@@ -214,7 +214,7 @@ ISR(TIMER2_OVF_vect) {
   }
 
   if (stepperTrigger[2] && stepperCounter[2] == stepperTrigger[2]) {
-    PORTD |= B00100000;
+    PORTD |= B00010000;
     stepperCounter[2] = 0;
     if (stepperDirection[2] == 0) {
       stepperPosition[2]++;
@@ -233,7 +233,7 @@ ISR(TIMER2_OVF_vect) {
       }
     }
   } else {
-    PORTD &= B11011111;
+    PORTD &= B11101111;
   }
 
   if (stepperTrigger[3] && stepperCounter[3] == stepperTrigger[3]) {
