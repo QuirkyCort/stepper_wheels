@@ -1,65 +1,46 @@
-/*
- * Register Map
- * ===
- * Unlike most I2C memory device where each register address maps to a single byte,
- * this controller maps each address to a variable number of bytes.
- * Eg. 0x41 is a Int16 (2 bytes) address. You'll need to read / write 2 bytes at
- * a time when using this address. If you read 0x42, you will NOT get the higher or
- * lower byte of 0x41.
- *
- * Read Only
- * ===
- * 0x00 (2 x Int8): Version. Major, Minor.
- * 0x01 (Int8): Reset if a 1 is written.
- * 0x02 (Int8): 1 to enable (default), 0 to disable
- *
- * Read Write
- * ===
- * 0x41 (Int16): Stepper 1 Trigger.
- * 0x42 (Int16): Stepper 2 Trigger.
- * 0x43 (Int16): Stepper 3 Trigger.
- * 0x44 (Int16): Stepper 4 Trigger.
- * 0 means never trigger. 1 is the minimum trigger.
- * The trigger controls the period between each step.
- * Period = (trigger + 1) * 128us
- *
- * 0x45 (Int8): Stepper 1 Direction.
- * 0x46 (Int8): Stepper 2 Direction.
- * 0x47 (Int8): Stepper 3 Direction.
- * 0x48 (Int8): Stepper 4 Direction.
- * 0 means forward, 1 means reverse.
- *
- * 0x49 (Int8): Stepper 1 Mode.
- * 0x4A (Int8): Stepper 2 Mode.
- * 0x4B (Int8): Stepper 3 Mode.
- * 0x4C (Int8): Stepper 4 Mode.
- * 0 means "run continuous", 1 means "run till target position".
- *
- * 0x4D (Int32): Stepper 1 Position.
- * 0x4E (Int32): Stepper 2 Position.
- * 0x4F (Int32): Stepper 3 Position.
- * 0x50 (Int32): Stepper 4 Position.
- *
- * 0x51 (Int32): Stepper 1 Target Position.
- * 0x52 (Int32): Stepper 2 Target Position.
- * 0x53 (Int32): Stepper 3 Target Position.
- * 0x54 (Int32): Stepper 4 Target Position.
- */
-
 #include <Wire.h>
 
-byte VERSION[] = {1, 1, 1};
+#define MAJOR_VERSION 1
+#define MINOR_VERSION 1
+#define PATCH_VERSION 1
+
+#define I2C_ADDRESS 0x55
+
+#define LOOP_PERIOD_MS 100
+#define MIN_SPEED 10
+
+#define TARGET_POS_TYPE_SET 0
+#define TARGET_POS_TYPE_ADD 1
+
+#define MODE_STOP 0
+#define MODE_RUN_CONTINUOUS 1
+#define MODE_RUN_TO_TARGET_TIME 2
+#define MODE_RUN_TO_TARGET_POS 20
+#define MODE_RUN_TO_TARGET_POS_W_RAMP 21
+
+
+const byte VERSION[] = { MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION };
 
 volatile uint8_t registerPtr = 0;
 
-volatile uint16_t stepperCounter[4];
+volatile uint16_t counter[4];
 
-volatile uint16_t stepperTrigger[4];
-volatile uint8_t stepperDirection[4];
-volatile uint8_t stepperMode[4];
-volatile int32_t stepperPosition[4];
-volatile int32_t stepperTargetPosition[4];
+volatile uint16_t trigger[4];
+volatile uint8_t direction[4];
+volatile uint8_t mode[4];
+volatile int32_t position[4];
+volatile int32_t targetPosition[4];
+volatile uint16_t targetTime[4];
 
+volatile uint16_t speed[4];
+volatile uint16_t rampUpCounter[4];
+volatile uint16_t rampUpDelta[4];
+volatile uint16_t cruiseCounter[4];
+volatile uint16_t cruiseSpeed[4];
+volatile uint16_t rampDownCounter[4];
+volatile uint16_t rampDownDelta[4];
+
+unsigned long last_loop_time = 0;
 
 void i2cRxHandler(int numBytes) {
   registerPtr = Wire.read(); // First byte always sets ptr
@@ -80,34 +61,34 @@ void i2cRxHandler(int numBytes) {
 
   // Trigger
   } else if (registerPtr >= 0x41 && registerPtr <= 0x44 && numBytes == 3) {
-    byte *bytes = (byte*)&stepperTrigger[registerPtr - 0x41];
+    byte *bytes = (byte*)&trigger[registerPtr - 0x41];
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
-    stepperCounter[registerPtr - 0x41] = 0;
+    counter[registerPtr - 0x41] = 0;
 
   // Direction
   } else if (registerPtr >= 0x45 && registerPtr <= 0x48 && numBytes == 2) {
-    stepperDirection[registerPtr - 0x45] = Wire.read();
+    direction[registerPtr - 0x45] = Wire.read();
     if (registerPtr == 0x45) {
-      if (stepperDirection[0] == 1) {
+      if (direction[0] == 1) {
         PORTD |= B00100000;
       } else {
         PORTD &= B11011111;
       }
     } else if (registerPtr == 0x46) {
-      if (stepperDirection[1] == 1) {
+      if (direction[1] == 1) {
         PORTD |= B01000000;
       } else {
         PORTD &= B10111111;
       }
     } else if (registerPtr == 0x47) {
-      if (stepperDirection[2] == 1) {
+      if (direction[2] == 1) {
         PORTD |= B10000000;
       } else {
         PORTD &= B01111111;
       }
     } else if (registerPtr == 0x48) {
-      if (stepperDirection[3] == 1) {
+      if (direction[3] == 1) {
         PORTB |= B00100000;
       } else {
         PORTB &= B11011111;
@@ -116,24 +97,77 @@ void i2cRxHandler(int numBytes) {
 
   // Mode
   } else if (registerPtr >= 0x49 && registerPtr <= 0x4C && numBytes == 2) {
-    stepperMode[registerPtr - 0x49] = Wire.read();
+    mode[registerPtr - 0x49] = Wire.read();
 
   // Position
   } else if (registerPtr >= 0x4D && registerPtr <= 0x50 && numBytes == 5) {
-    byte *bytes = (byte*)&stepperPosition[registerPtr - 0x4D];
+    byte *bytes = (byte*)&position[registerPtr - 0x4D];
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
     bytes[2] = Wire.read();
     bytes[3] = Wire.read();
 
   // Target Position
-  } else if (registerPtr >= 0x51 && registerPtr <= 0x54 && numBytes == 5) {
-    byte *bytes = (byte*)&stepperTargetPosition[registerPtr - 0x51];
+  } else if (registerPtr >= 0x51 && registerPtr <= 0x54 && numBytes == 6) {
+    uint8_t type = Wire.read();
+    uint8_t index = registerPtr - 0x51;
+
+    byte *bytes = (byte*)&targetPosition[index];
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
     bytes[2] = Wire.read();
     bytes[3] = Wire.read();
 
+    if (type == TARGET_POS_TYPE_ADD) {
+      targetPosition[index] += position[index];
+    }
+
+  // Target Time
+  } else if (registerPtr >= 0x55 && registerPtr <= 0x58 && numBytes == 3) {
+    byte *bytes = (byte*)&targetTime[registerPtr - 0x55];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+  // Target Position with Ramp
+  } else if (registerPtr >= 0x59 && registerPtr <= 0x5C && numBytes == 18) {
+    uint8_t type = Wire.read();
+    uint8_t index = registerPtr - 0x51;
+
+    byte *bytes = (byte*)&targetPosition[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+    bytes[2] = Wire.read();
+    bytes[3] = Wire.read();
+
+    if (type == TARGET_POS_TYPE_ADD) {
+      targetPosition[index] += position[index];
+    }
+
+    bytes = (byte*)&rampUpCounter[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&rampUpDelta[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&cruiseCounter[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&cruiseSpeed[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&rampDownCounter[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&rampDownDelta[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    speed[index] = 0;
   }
 
 }
@@ -144,45 +178,49 @@ void i2cReqHandler(void) {
 
   // Trigger
   } else if (registerPtr >= 0x41 && registerPtr <= 0x44) {
-    Wire.write((byte*)&stepperTrigger[registerPtr - 0x41], 2);
+    Wire.write((byte*)&trigger[registerPtr - 0x41], 2);
 
   // Direction
   } else if (registerPtr >= 0x45 && registerPtr <= 0x48) {
-    Wire.write(stepperDirection[registerPtr - 0x45]);
+    Wire.write(direction[registerPtr - 0x45]);
 
   // Mode
   } else if (registerPtr >= 0x49 && registerPtr <= 0x4C) {
-    Wire.write(stepperDirection[registerPtr - 0x49]);
+    Wire.write(direction[registerPtr - 0x49]);
 
   // Position
   } else if (registerPtr >= 0x4D && registerPtr <= 0x50) {
-    Wire.write((byte*)&stepperPosition[registerPtr - 0x4D], 4);
+    Wire.write((byte*)&position[registerPtr - 0x4D], 4);
 
   // Target Position
   } else if (registerPtr >= 0x51 && registerPtr <= 0x54) {
-    Wire.write((byte*)&stepperTargetPosition[registerPtr - 0x51], 4);
+    Wire.write((byte*)&targetPosition[registerPtr - 0x51], 4);
+
+  // Target Time
+  } else if (registerPtr >= 0x55 && registerPtr <= 0x58) {
+    Wire.write((byte*)&targetTime[registerPtr - 0x51], 2);
 
   }
 }
 
 // Loop unrolled to save clock cycles. Not sure if that's really needed.
 ISR(TIMER2_OVF_vect) {
-  if (stepperTrigger[0] && stepperCounter[0] == stepperTrigger[0]) {
+  if (trigger[0] && counter[0] == trigger[0]) {
     PORTD |= B00000100;
-    stepperCounter[0] = 0;
-    if (stepperDirection[0] == 0) {
-      stepperPosition[0]++;
+    counter[0] = 0;
+    if (direction[0] == 0) {
+      position[0]++;
     } else {
-      stepperPosition[0]--;
+      position[0]--;
     }
-    if (stepperMode[0] == 1) {
-      if (stepperDirection[0] == 0) {
-        if (stepperPosition[0] >= stepperTargetPosition[0]) {
-          stepperTrigger[0] = 0;
+    if (mode[0] >= MODE_RUN_TO_TARGET_POS) {
+      if (direction[0] == 0) {
+        if (position[0] >= targetPosition[0]) {
+          trigger[0] = 0;
         }
       } else {
-        if (stepperPosition[0] <= stepperTargetPosition[0]) {
-          stepperTrigger[0] = 0;
+        if (position[0] <= targetPosition[0]) {
+          trigger[0] = 0;
         }
       }
     }
@@ -190,22 +228,22 @@ ISR(TIMER2_OVF_vect) {
     PORTD &= B11111011;
   }
 
-  if (stepperTrigger[1] && stepperCounter[1] == stepperTrigger[1]) {
+  if (trigger[1] && counter[1] == trigger[1]) {
     PORTD |= B00001000;
-    stepperCounter[1] = 0;
-    if (stepperDirection[1] == 0) {
-      stepperPosition[1]++;
+    counter[1] = 0;
+    if (direction[1] == 0) {
+      position[1]++;
     } else {
-      stepperPosition[1]--;
+      position[1]--;
     }
-    if (stepperMode[1] == 1) {
-      if (stepperDirection[1] == 0) {
-        if (stepperPosition[1] >= stepperTargetPosition[1]) {
-          stepperTrigger[1] = 0;
+    if (mode[1] >= MODE_RUN_TO_TARGET_POS) {
+      if (direction[1] == 0) {
+        if (position[1] >= targetPosition[1]) {
+          trigger[1] = 0;
         }
       } else {
-        if (stepperPosition[1] <= stepperTargetPosition[1]) {
-          stepperTrigger[1] = 0;
+        if (position[1] <= targetPosition[1]) {
+          trigger[1] = 0;
         }
       }
     }
@@ -213,22 +251,22 @@ ISR(TIMER2_OVF_vect) {
     PORTD &= B11110111;
   }
 
-  if (stepperTrigger[2] && stepperCounter[2] == stepperTrigger[2]) {
+  if (trigger[2] && counter[2] == trigger[2]) {
     PORTD |= B00010000;
-    stepperCounter[2] = 0;
-    if (stepperDirection[2] == 0) {
-      stepperPosition[2]++;
+    counter[2] = 0;
+    if (direction[2] == 0) {
+      position[2]++;
     } else {
-      stepperPosition[2]--;
+      position[2]--;
     }
-    if (stepperMode[2] == 1) {
-      if (stepperDirection[2] == 0) {
-        if (stepperPosition[2] >= stepperTargetPosition[2]) {
-          stepperTrigger[2] = 0;
+    if (mode[2] >= MODE_RUN_TO_TARGET_POS) {
+      if (direction[2] == 0) {
+        if (position[2] >= targetPosition[2]) {
+          trigger[2] = 0;
         }
       } else {
-        if (stepperPosition[2] <= stepperTargetPosition[2]) {
-          stepperTrigger[2] = 0;
+        if (position[2] <= targetPosition[2]) {
+          trigger[2] = 0;
         }
       }
     }
@@ -236,22 +274,22 @@ ISR(TIMER2_OVF_vect) {
     PORTD &= B11101111;
   }
 
-  if (stepperTrigger[3] && stepperCounter[3] == stepperTrigger[3]) {
+  if (trigger[3] && counter[3] == trigger[3]) {
     PORTB |= B00010000;
-    stepperCounter[3] = 0;
-    if (stepperDirection[3] == 0) {
-      stepperPosition[3]++;
+    counter[3] = 0;
+    if (direction[3] == 0) {
+      position[3]++;
     } else {
-      stepperPosition[3]--;
+      position[3]--;
     }
-    if (stepperMode[3] == 1) {
-      if (stepperDirection[3] == 0) {
-        if (stepperPosition[3] >= stepperTargetPosition[3]) {
-          stepperTrigger[3] = 0;
+    if (mode[3] >= MODE_RUN_TO_TARGET_POS) {
+      if (direction[3] == 0) {
+        if (position[3] >= targetPosition[3]) {
+          trigger[3] = 0;
         }
       } else {
-        if (stepperPosition[3] <= stepperTargetPosition[3]) {
-          stepperTrigger[3] = 0;
+        if (position[3] <= targetPosition[3]) {
+          trigger[3] = 0;
         }
       }
     }
@@ -259,14 +297,14 @@ ISR(TIMER2_OVF_vect) {
     PORTD &= B11101111;
   }
 
-  stepperCounter[0]++;
-  stepperCounter[1]++;
-  stepperCounter[2]++;
-  stepperCounter[3]++;
+  counter[0]++;
+  counter[1]++;
+  counter[2]++;
+  counter[3]++;
 }
 
 void setupTimer() {
-  TCCR2A = 0;           // Init Timer1A
+  TCCR2A = 0;           // Init Timer2
   TCCR2B = B00000010;   // Prescaler = 8
   TIMSK2 = B00000001;   // Enable Timer Overflow Interrupt
 }
@@ -304,16 +342,16 @@ void initPins() {
 void resetSteppers() {
   initPins();
   for (char i=0; i<4; i++) {
-    stepperTrigger[i] = 0;
-    stepperDirection[i] = 0;
-    stepperMode[i] = 0;
-    stepperPosition[i] = 0;
-    stepperTargetPosition[i] = 0;
+    trigger[i] = 0;
+    direction[i] = 0;
+    mode[i] = 0;
+    position[i] = 0;
+    targetPosition[i] = 0;
   }
 }
 
 void initI2C() {
-  Wire.begin(0x55); // Initialize I2C (Slave Mode: address=0x55 )
+  Wire.begin(I2C_ADDRESS);
   Wire.onReceive(i2cRxHandler);
   Wire.onRequest(i2cReqHandler);
 }
@@ -324,5 +362,51 @@ void setup() {
   setupTimer();
 }
 
+void run_to_target_time(int i) {
+  if (targetTime[i] == 0) {
+    trigger[i] = 0;
+  } else {
+    targetTime[i]--
+  }
+}
+
+void run_to_target_pos_w_ramp(int i) {
+  if (rampUpCounter[i] > 0) {
+    speed[i] += rampUpDelta[i];
+    if (speed[i] < MIN_SPEED) {
+      speed[i] = MIN_SPEED;
+    }
+    trigger[i] = (1000000 / speed) / 128 - 1;
+    counter[i] = 0;
+    rampUpCounter[i]--;
+  } else if (cruiseCounter[i] > 0) {
+    if (speed[i] != cruiseSpeed[i]) {
+      speed[i] = cruiseSpeed[i];
+      trigger[i] = (1000000 / cruiseSpeed[i]) / 128 - 1;
+      counter[i] = 0;
+    }
+    cruiseCounter[i]--;
+  } else if (rampDownCounter[i] > 0) {
+    speed[i] -= rampDownDelta[i];
+    if (speed[i] < MIN_SPEED) {
+      speed[i] = MIN_SPEED;
+    }
+    trigger[i] = (1000000 / speed) / 128 - 1;
+    counter[i] = 0;
+    rampDownCounter[i]--;
+  }
+}
+
 void loop() {
+  if (millis() - last_loop_time > LOOP_PERIOD_MS){
+    last_loop_time = millis();
+
+    for (char i=0; i<4; i++) {
+      if (mode[i] == MODE_RUN_TO_TARGET_TIME) {
+        run_to_target_time(i);
+      } else if (mode[i] == MODE_RUN_TO_TARGET_POS_W_RAMP) {
+        run_to_target_pos_w_ramp(i)
+      }
+    }
+  }
 }
