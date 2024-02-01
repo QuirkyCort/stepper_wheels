@@ -19,7 +19,7 @@ If you read 0x42, you will NOT get the higher or lower byte of 0x41.
 * UInt8: Minor Version
 * UInt8: Patch Version
 
-### Reset (0x01) (UInt8)
+### Reset (0x01) (UInt8) (Write-Only)
 Reset if a 1 is written.
 
 ### Enable (0x02) (UInt8)
@@ -73,13 +73,13 @@ Each address correspond to one stepper (X, Y, Z, A).
 * UInt8: Target Position Type
 * Int32: Target Position
 
-If Target Position Type is set to 0, the Target Position will set based on the given value.
-If the Target Position Type is set to 1, the current position will be added to the given value.
+If Target Position Type is set to 0 (absolute), the Target Position will set based on the given value.
+If the Target Position Type is set to 1 (relative), the current position will be added to the given value.
 
 When in "run continuous" mode, this value is ignored.
 When in "run till target position" or "run till target position with ramp" mode, the stepper will be automatically stopped, and trigger set to zero when this position is reached.
 
-When reading this address, only the Target Position (Int32) is read.
+When reading this address, only the Target Position (Int32) is read and the value is always absolute.
 
 ### Target Time (0x55, 0x56, 0x57, 0x58) (UInt16)
 Each address correspond to one stepper (X, Y, Z, A).
@@ -87,12 +87,13 @@ Each address correspond to one stepper (X, Y, Z, A).
 Target time to run in units of 100ms (ie. if set to 20, the stepper will run for 2000ms).
 Only used in "run till target time" mode.
 
-### Target Position with Ramp (0x59, 0x5A, 0x5B, 0x5C) (UInt8, Int32, UInt16 * 6)
+When read, it provides the remaining time to run.
+
+### Target Position with Ramp (0x59, 0x5A, 0x5B, 0x5C) (Int32, UInt16 * 6)
 Each address correspond to one stepper (X, Y, Z, A).
 
 The values to write are...
 
-* UInt8: Target Position Type
 * Int32: Target Position
 * UInt16: Ramp-up Counter (units of 100ms)
 * UInt16: Ramp-up Delta (amount added to speed at each ramp-up interval)
@@ -101,16 +102,17 @@ The values to write are...
 * UInt16: Ramp-down Counter (units of 100ms)
 * UInt16: Ramp-down Delta (amount subtracted from speed at each ramp-down interval)
 
-If Target Position Type is set to 0, the Target Position will set based on the given value.
-If the Target Position Type is set to 1, the current position will be added to the given value.
+Target position is always relative to the current position.
+When the target position is reached, the stepper will stop.
+
+Note that speed is always positive; if moving in reverse, direction must be set separately.
 
 Every 100ms, the stepper will increase its speed by "Ramp-up Delta" and reduce "Ramp-up Counter" by one, until "Ramp-up Counter" reaches zero.
 
 The stepper will then run at "Cruise Speed" for "Cruise Counter" * 100ms.
 
 Finally, the will reduce its speed by "Ramp-down Delta" and reduce "Ramp-down Counter" by one every 100ms, until "Ramp-down Counter" reaches zero.
-
-Note that the speed will never drop below MIN_SPEED. When the target position is reached, the stepper will stop.
+Speed will never drop below MIN_SPEED.
 
 This address is write-only, but the target position may be read using the Target Position address.
 The speed may also be determined at any time by reading Trigger and calculating speed from it.

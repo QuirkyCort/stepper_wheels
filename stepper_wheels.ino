@@ -25,6 +25,7 @@ volatile uint8_t registerPtr = 0;
 
 volatile uint16_t counter[4];
 
+volatile uint8_t enable;
 volatile uint16_t trigger[4];
 volatile uint8_t direction[4];
 volatile uint8_t mode[4];
@@ -55,8 +56,10 @@ void i2cRxHandler(int numBytes) {
   } else if (registerPtr == 0x2 && numBytes == 2) {
     if (Wire.read() == 0x1) {
       PORTB &= B11111110;
+      enable = 1;
     } else {
       PORTB |= B00000001;
+      enable = 0;
     }
 
   // Trigger
@@ -130,7 +133,6 @@ void i2cRxHandler(int numBytes) {
 
   // Target Position with Ramp
   } else if (registerPtr >= 0x59 && registerPtr <= 0x5C && numBytes == 18) {
-    uint8_t type = Wire.read();
     uint8_t index = registerPtr - 0x51;
 
     byte *bytes = (byte*)&targetPosition[index];
@@ -139,9 +141,7 @@ void i2cRxHandler(int numBytes) {
     bytes[2] = Wire.read();
     bytes[3] = Wire.read();
 
-    if (type == TARGET_POS_TYPE_ADD) {
-      targetPosition[index] += position[index];
-    }
+    targetPosition[index] += position[index];
 
     bytes = (byte*)&rampUpCounter[index];
     bytes[0] = Wire.read();
@@ -173,6 +173,7 @@ void i2cRxHandler(int numBytes) {
 }
 
 void i2cReqHandler(void) {
+  // Version
   if (registerPtr == 0) {
     Wire.write(VERSION, 3);
 
@@ -336,7 +337,7 @@ void initPins() {
 
   pinMode(8, OUTPUT); // Enable
   digitalWrite(9, 0); // LOW to enable
-
+  enable = 1;
 }
 
 void resetSteppers() {
@@ -366,7 +367,7 @@ void run_to_target_time(int i) {
   if (targetTime[i] == 0) {
     trigger[i] = 0;
   } else {
-    targetTime[i]--
+    targetTime[i]--;
   }
 }
 
@@ -376,7 +377,7 @@ void run_to_target_pos_w_ramp(int i) {
     if (speed[i] < MIN_SPEED) {
       speed[i] = MIN_SPEED;
     }
-    trigger[i] = (1000000 / speed) / 128 - 1;
+    trigger[i] = (1000000 / speed[i]) / 128 - 1;
     counter[i] = 0;
     rampUpCounter[i]--;
   } else if (cruiseCounter[i] > 0) {
@@ -391,7 +392,7 @@ void run_to_target_pos_w_ramp(int i) {
     if (speed[i] < MIN_SPEED) {
       speed[i] = MIN_SPEED;
     }
-    trigger[i] = (1000000 / speed) / 128 - 1;
+    trigger[i] = (1000000 / speed[i]) / 128 - 1;
     counter[i] = 0;
     rampDownCounter[i]--;
   }
@@ -405,7 +406,7 @@ void loop() {
       if (mode[i] == MODE_RUN_TO_TARGET_TIME) {
         run_to_target_time(i);
       } else if (mode[i] == MODE_RUN_TO_TARGET_POS_W_RAMP) {
-        run_to_target_pos_w_ramp(i)
+        run_to_target_pos_w_ramp(i);
       }
     }
   }
