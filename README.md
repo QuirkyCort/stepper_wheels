@@ -10,8 +10,12 @@ This can be changed by modifying ```I2C_ADDRESS``` in the code.
 
 ## Register Map
 Unlike most I2C memory device where each register address maps to a single byte, this controller maps each address to a variable number of bytes.
-Eg. 0x0 is a UInt8 * 3 (3 bytes) address. You'll need to read / write 3 bytes at a time when using this address. Each byte is a UInt8 value.
-Eg. 0x41 is a Int16 (2 bytes) address. You'll need to read / write 2 bytes at a time when using this address.
+Examples...
+
+* 0x00 is a UInt8 * 3 (3 bytes) address. You'll need to read / write 3 bytes at a time when using this address.
+Each byte is a UInt8 value.
+
+* 0x41 is a Int16 (2 bytes) address. You'll need to read / write 2 bytes at a time when using this address.
 If you read 0x42, you will NOT get the higher or lower byte of 0x41.
 
 ### Version (0x00) (UInt8 * 3) (Read-Only)
@@ -23,7 +27,7 @@ If you read 0x42, you will NOT get the higher or lower byte of 0x41.
 Reset if a 1 is written.
 
 ### Enable (0x02) (UInt8)
-1 to enable (default), 0 to disable
+1 to enable (default), 0 to disable.
 If disabled, the steppers will be free to rotate.
 If enabled, the steppers will be held in place.
 
@@ -56,9 +60,10 @@ Each address correspond to one stepper (X, Y, Z, A).
 Run mode:
 * 0 : "stop"
 * 1 : "run continuous"
-* 2 : "run till target time"
-* 20 : "run till target position"
-* 21 : "run till target position with ramp"
+* 20 : "run till target time"
+* 21 : "run till target time with ramp"
+* 30 : "run till target position"
+* 31 : "run till target position with ramp"
 
 ### Position (0x4D, 0x4E, 0x4F, 0x50) (Int32)
 Each address correspond to one stepper (X, Y, Z, A).
@@ -116,3 +121,25 @@ Speed will never drop below MIN_SPEED.
 
 This address is write-only, but the target position may be read using the Target Position address.
 The speed may also be determined at any time by reading Trigger and calculating speed from it.
+
+### Target Time with Ramp (0x5D, 0x5E, 0x5F, 0x60) (UInt16 * 6)
+Each address correspond to one stepper (X, Y, Z, A).
+
+The values to write are...
+
+* UInt16: Ramp-up Counter (units of 100ms)
+* UInt16: Ramp-up Delta (amount added to speed at each ramp-up interval)
+* UInt16: Cruise Counter (units of 100ms)
+* UInt16: Cruise Speed (steps per second)
+* UInt16: Ramp-down Counter (units of 100ms)
+* UInt16: Ramp-down Delta (amount subtracted from speed at each ramp-down interval)
+
+Note that speed is always positive; if moving in reverse, direction must be set separately.
+
+Every 100ms, the stepper will increase its speed by "Ramp-up Delta" and reduce "Ramp-up Counter" by one, until "Ramp-up Counter" reaches zero.
+
+The stepper will then run at "Cruise Speed" for "Cruise Counter" * 100ms.
+
+Finally, the will reduce its speed by "Ramp-down Delta" and reduce "Ramp-down Counter" by one every 100ms, until "Ramp-down Counter" reaches zero, at which time the stepper will stop.
+
+This address is write-only, but the speed may be determined at any time by reading Trigger and calculating speed from it.

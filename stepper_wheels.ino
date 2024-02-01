@@ -14,9 +14,10 @@
 
 #define MODE_STOP 0
 #define MODE_RUN_CONTINUOUS 1
-#define MODE_RUN_TO_TARGET_TIME 2
-#define MODE_RUN_TO_TARGET_POS 20
-#define MODE_RUN_TO_TARGET_POS_W_RAMP 21
+#define MODE_RUN_TO_TARGET_TIME 20
+#define MODE_RUN_TO_TARGET_TIME_W_RAMP 21
+#define MODE_RUN_TO_TARGET_POS 30
+#define MODE_RUN_TO_TARGET_POS_W_RAMP 31
 
 
 const byte VERSION[] = { MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION };
@@ -132,7 +133,7 @@ void i2cRxHandler(int numBytes) {
     bytes[1] = Wire.read();
 
   // Target Position with Ramp
-  } else if (registerPtr >= 0x59 && registerPtr <= 0x5C && numBytes == 18) {
+  } else if (registerPtr >= 0x59 && registerPtr <= 0x5C && numBytes == 17) {
     uint8_t index = registerPtr - 0x51;
 
     byte *bytes = (byte*)&targetPosition[index];
@@ -142,6 +143,36 @@ void i2cRxHandler(int numBytes) {
     bytes[3] = Wire.read();
 
     targetPosition[index] += position[index];
+
+    bytes = (byte*)&rampUpCounter[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&rampUpDelta[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&cruiseCounter[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&cruiseSpeed[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&rampDownCounter[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    bytes = (byte*)&rampDownDelta[index];
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+
+    speed[index] = 0;
+
+  // Target Time with Ramp
+  } else if (registerPtr >= 0x5D && registerPtr <= 0x60 && numBytes == 13) {
+    uint8_t index = registerPtr - 0x51;
 
     bytes = (byte*)&rampUpCounter[index];
     bytes[0] = Wire.read();
@@ -371,7 +402,7 @@ void run_to_target_time(int i) {
   }
 }
 
-void run_to_target_pos_w_ramp(int i) {
+void run_ramp(int i) {
   if (rampUpCounter[i] > 0) {
     speed[i] += rampUpDelta[i];
     if (speed[i] < MIN_SPEED) {
@@ -406,7 +437,12 @@ void loop() {
       if (mode[i] == MODE_RUN_TO_TARGET_TIME) {
         run_to_target_time(i);
       } else if (mode[i] == MODE_RUN_TO_TARGET_POS_W_RAMP) {
-        run_to_target_pos_w_ramp(i);
+        if (rampDownCounter == 0) {
+          trigger[i] = 0;
+        }
+        run_ramp(i);
+      } else if (mode[i] == MODE_RUN_TO_TARGET_POS_W_RAMP) {
+        run_ramp(i);
       }
     }
   }
