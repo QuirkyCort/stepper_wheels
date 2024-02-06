@@ -85,14 +85,14 @@ class Motor:
         addr = self.wheel + TARGET_TIME_REG
         return struct.unpack('<H', self.controller.read(addr, 2))[0]
 
-    def set_target_position_with_ramp(self, position, up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta):
+    def set_target_position_with_ramp(self, position, cruise_end_position, up_count, up_delta, cruise_speed, down_count, down_delta):
         addr = self.wheel + TARGET_POSITION_WITH_RAMP_REG
         data = struct.pack(
-            '<iHHHHHH',
+            '<iiHHHHH',
             int(position),
+            int(cruise_end_position),
             int(up_count),
             int(up_delta),
-            int(cruise_count),
             int(cruise_speed),
             int(down_count),
             int(down_delta)
@@ -192,14 +192,12 @@ class Motor:
     def set_target_position_with_accel(self, speed, position):
         up_count = speed // self.acceleration_up
         up_delta = speed // up_count
-        down_count = speed // self.acceleration_down
+        down_count = speed // self.acceleration_down - 1
         down_delta = speed // down_count
-        up_ramp_dist = (up_delta + speed) // 2 * up_count * TIME_STEP_MS // 1000
         down_ramp_dist = (down_delta + speed) // 2 * down_count * TIME_STEP_MS // 1000
-        cruise_count = (abs(position) - up_ramp_dist - down_ramp_dist) * 1000 // TIME_STEP_MS // speed
+        cruise_end_position = position - down_ramp_dist
         cruise_speed = speed
-        print(position, up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta)
-        self.set_target_position_with_ramp(position, up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta)
+        self.set_target_position_with_ramp(position, cruise_end_position, up_count, up_delta, cruise_speed, down_count, down_delta)
 
     # User facing methods.
     # While the above methods may be public, the user should avoid using them and use the below methods instead.

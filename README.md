@@ -100,14 +100,14 @@ Each address correspond to one stepper (X, Y, Z, A).
 The values to write are...
 
 * Int32: Target Position
+* Int32: Cruise End Position
 * UInt16: Ramp-up Counter (units of 100ms)
 * UInt16: Ramp-up Delta (amount added to speed at each ramp-up interval)
-* UInt16: Cruise Counter (units of 100ms)
 * UInt16: Cruise Speed (steps per second)
 * UInt16: Ramp-down Counter (units of 100ms)
 * UInt16: Ramp-down Delta (amount subtracted from speed at each ramp-down interval)
 
-Target position is always relative to the current position.
+Target position and Cruise End Position are always relative to the current position.
 When the target position is reached, the stepper will stop.
 
 Note that speed is always positive; if moving in reverse, direction must be set separately.
