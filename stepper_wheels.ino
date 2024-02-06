@@ -154,8 +154,8 @@ void i2cRxHandler(int numBytes) {
       targetPosition[index] += position[index];
       cruiseEndPosition[index] += position[index];
     } else {
-      targetPosition[index] = position[index] - targetPosition[index];
-      cruiseEndPosition[index] = position[index] - cruiseEndPosition[index];
+      targetPosition[index] = position[index] + targetPosition[index];
+      cruiseEndPosition[index] = position[index] + cruiseEndPosition[index];
     }
 
     bytes = (byte*)&rampUpCounter[index];
@@ -258,11 +258,15 @@ ISR(TIMER2_OVF_vect) {
     if (mode[0] >= MODE_RUN_TO_TARGET_POS) {
       if (direction[0] == 0) {
         if (position[0] >= targetPosition[0]) {
+          Serial.println("d0");
           trigger[0] = 0;
           mode[0] = MODE_STOP;
         }
       } else {
         if (position[0] <= targetPosition[0]) {
+          Serial.println(position[0]);
+          Serial.println(targetPosition[0]);
+          Serial.println("d1");
           trigger[0] = 0;
           mode[0] = MODE_STOP;
         }
@@ -472,7 +476,7 @@ void setup() {
   resetSteppers();
   setupTimer();
 
-//  Serial.begin(9600);
+  Serial.begin(9600);
 }
 
 void loop() {
