@@ -85,51 +85,36 @@ class Motor:
         addr = self.wheel + TARGET_TIME_REG
         return struct.unpack('<H', self.controller.read(addr, 2))[0]
 
-    def set_target_position_with_ramp(self, speed, position):
+    def set_target_position_with_ramp(self, position, up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta):
         addr = self.wheel + TARGET_POSITION_WITH_RAMP_REG
-        ramp_up_count = speed // self.acceleration_up
-        ramp_up_delta = speed // ramp_up_count
-        ramp_down_count = speed // self.acceleration_down
-        ramp_down_delta = speed // ramp_down_count
-        up_ramp_dist = (1 + ramp_up_count) * ramp_up_count // 2 * TIME_STEP_MS * self.acceleration_up // 1000
-        down_ramp_dist = (1 + ramp_down_count) * ramp_down_count // 2 * TIME_STEP_MS * self.acceleration_down // 1000
-        cruise_count = abs(position) - up_ramp_dist - down_ramp_dist
-        cruise_speed = speed
         data = struct.pack(
             '<iHHHHHH',
             int(position),
-            int(ramp_up_count),
-            int(ramp_up_delta),
+            int(up_count),
+            int(up_delta),
             int(cruise_count),
             int(cruise_speed),
-            int(ramp_down_count),
-            int(ramp_down_delta)
+            int(down_count),
+            int(down_delta)
         )
         self.controller.write(addr, data)
 
-    def set_target_time_with_ramp(self, speed, time):
+    def set_target_time_with_ramp(self, up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta):
         addr = self.wheel + TARGET_TIME_WITH_RAMP_REG
-        total_time_steps = round(time * 1000 / TIME_STEP_MS)
-        ramp_up_count = speed // self.acceleration_up
-        ramp_up_delta = speed // ramp_up_count
-        ramp_down_count = speed // self.acceleration_down
-        ramp_down_delta = speed // ramp_down_count
-        cruise_count = total_time_steps - ramp_up_count - ramp_down_count
-        cruise_speed = speed
         data = struct.pack(
             '<HHHHHH',
-            int(ramp_up_count),
-            int(ramp_up_delta),
+            int(up_count),
+            int(up_delta),
             int(cruise_count),
             int(cruise_speed),
-            int(ramp_down_count),
-            int(ramp_down_delta)
+            int(down_count),
+            int(down_delta)
         )
         self.controller.write(addr, data)
 
     # Following methods are derived from above methods
 
-    def _wait_till_stop(self):
+    def wait_till_stop(self):
         while self.get_trigger() != 0:
             time.sleep_ms(WAIT_MS)
 
@@ -146,8 +131,10 @@ class Motor:
         self.set_trigger(trigger)
 
     def get_speed(self):
-        direction = self.get_direction()
         trigger = self.get_trigger()
+        if trigger == 0:
+            return 0
+        direction = self.get_direction()
         period = (trigger + 1) * 128
         speed = round(1000000 / period)
 
@@ -155,17 +142,6 @@ class Motor:
             return speed
         else:
             return -speed
-
-    def stop(self):
-        self.set_trigger(0)
-        self.set_mode(MODE_STOP)
-
-    def run(self, speed):
-        self.set_speed(speed)
-        self.set_mode(MODE_RUN_CONTIUOUS)
-
-    def speed(self):
-        return self.get_speed()
 
     def _run_time_no_ramp(self, speed, time):
         self.set_speed(speed)
@@ -179,16 +155,18 @@ class Motor:
             direction = 0
         speed = abs(speed)
         self.set_direction(direction)
-        self.set_target_time_with_ramp(speed, time)
+        self.set_target_time_with_accel(speed, time)
         self.set_mode(MODE_RUN_TILL_TIME_WITH_RAMP)
 
-    def run_time(self, speed, time, ramp=True, wait=True):
-        if ramp:
-            self._run_time_ramp(speed, time)
-        else:
-            self._run_time_no_ramp(speed, time)
-        if wait:
-            self._wait_till_stop()
+    def set_target_time_with_accel(self, speed, time):
+        total_time_steps = round(time * 1000 / TIME_STEP_MS)
+        up_count = speed // self.acceleration_up
+        up_delta = speed // up_count
+        down_count = speed // self.acceleration_down
+        down_delta = speed // down_count
+        cruise_count = total_time_steps - up_count - down_count
+        cruise_speed = speed
+        self.set_target_time_with_ramp(up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta)
 
     def _run_angle_no_ramp(self, speed, angle):
         angle = abs(angle)
@@ -208,8 +186,42 @@ class Motor:
         speed = abs(speed)
 
         self.set_direction(direction)
-        self.set_target_position_with_ramp(speed, angle)
+        self.set_target_position_with_accel(speed, angle)
         self.set_mode(MODE_RUN_TILL_POSITION_WITH_RAMP)
+
+    def set_target_position_with_accel(self, speed, position):
+        up_count = speed // self.acceleration_up
+        up_delta = speed // up_count
+        down_count = speed // self.acceleration_down
+        down_delta = speed // down_count
+        up_ramp_dist = (up_delta + speed) // 2 * up_count * TIME_STEP_MS // 1000
+        down_ramp_dist = (down_delta + speed) // 2 * down_count * TIME_STEP_MS // 1000
+        cruise_count = (abs(position) - up_ramp_dist - down_ramp_dist) * 1000 // TIME_STEP_MS // speed
+        cruise_speed = speed
+        print(position, up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta)
+        self.set_target_position_with_ramp(position, up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta)
+
+    # User facing methods.
+    # While the above methods may be public, the user should avoid using them and use the below methods instead.
+
+    def stop(self):
+        self.set_trigger(0)
+        self.set_mode(MODE_STOP)
+
+    def run(self, speed):
+        self.set_speed(speed)
+        self.set_mode(MODE_RUN_CONTIUOUS)
+
+    def speed(self):
+        return self.get_speed()
+
+    def run_time(self, speed, time, ramp=True, wait=True):
+        if ramp:
+            self._run_time_ramp(speed, time)
+        else:
+            self._run_time_no_ramp(speed, time)
+        if wait:
+            self.wait_till_stop()
 
     def run_angle(self, speed, angle, ramp=True, wait=True):
         if ramp:
@@ -218,16 +230,49 @@ class Motor:
             self._run_angle_no_ramp(speed, angle)
 
         if wait:
-            self._wait_till_stop()
+            self.wait_till_stop()
+
+
+class MoveTank:
+    def __init__(self, left_motor, right_motor):
+        try:
+            iter(left_motor)
+            self.left_motors = left_motor
+        except:
+            self.left_motors = (left_motor)
+
+        try:
+            iter(right_motor)
+            self.right_motors = right_motor
+        except:
+            self.right_motors = (right_motor)
+
+    def run(self, left_speed, right_speed):
+        for motor in self.left_motors:
+            motor.run(left_speed)
+
+        for motor in self.right_motors:
+            motor.run(right_speed)
+
+    def run_angle(self, left_speed, right_speed, angle):
+        left_speed_abs = abs(left_speed)
+        right_speed_abs = abs(right_speed)
+
+        if left_speed_abs > right_speed_abs:
+            minor_angle = right_speed_abs / left_speed_abs * angle
+        else:
+            minor_angle = left_speed_abs / right_speed_abs * angle
+
 
 
 class Controller:
-    def __init__(self, i2c, addr=55):
+    def __init__(self, i2c, addr=0x55):
         self.i2c = i2c
         self.addr = addr
+        self.reset()
 
     def read(self, reg, size):
-        self.i2c.readfrom_mem(self.addr, reg, size)
+        return self.i2c.readfrom_mem(self.addr, reg, size)
 
     def write(self, reg, data):
         self.i2c.writeto_mem(self.addr, reg, data)

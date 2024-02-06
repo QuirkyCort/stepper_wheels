@@ -101,7 +101,8 @@ void i2cRxHandler(int numBytes) {
 
   // Mode
   } else if (registerPtr >= 0x49 && registerPtr <= 0x4C && numBytes == 2) {
-    mode[registerPtr - 0x49] = Wire.read();
+    uint8_t index = registerPtr - 0x49;
+    mode[index] = Wire.read();
 
   // Position
   } else if (registerPtr >= 0x4D && registerPtr <= 0x50 && numBytes == 5) {
@@ -134,7 +135,7 @@ void i2cRxHandler(int numBytes) {
 
   // Target Position with Ramp
   } else if (registerPtr >= 0x59 && registerPtr <= 0x5C && numBytes == 17) {
-    uint8_t index = registerPtr - 0x51;
+    uint8_t index = registerPtr - 0x59;
 
     byte *bytes = (byte*)&targetPosition[index];
     bytes[0] = Wire.read();
@@ -142,7 +143,11 @@ void i2cRxHandler(int numBytes) {
     bytes[2] = Wire.read();
     bytes[3] = Wire.read();
 
-    targetPosition[index] += position[index];
+    if (direction == 0) {
+      targetPosition[index] += position[index];
+    } else {
+      targetPosition[index] = position[index] - targetPosition[index];
+    }
 
     bytes = (byte*)&rampUpCounter[index];
     bytes[0] = Wire.read();
@@ -172,9 +177,9 @@ void i2cRxHandler(int numBytes) {
 
   // Target Time with Ramp
   } else if (registerPtr >= 0x5D && registerPtr <= 0x60 && numBytes == 13) {
-    uint8_t index = registerPtr - 0x51;
+    uint8_t index = registerPtr - 0x5D;
 
-    bytes = (byte*)&rampUpCounter[index];
+    byte *bytes = (byte*)&rampUpCounter[index];
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
 
@@ -388,12 +393,6 @@ void initI2C() {
   Wire.onRequest(i2cReqHandler);
 }
 
-void setup() {
-  initI2C();
-  resetSteppers();
-  setupTimer();
-}
-
 void run_to_target_time(int i) {
   if (targetTime[i] == 0) {
     trigger[i] = 0;
@@ -405,6 +404,9 @@ void run_to_target_time(int i) {
 void run_ramp(int i) {
   if (rampUpCounter[i] > 0) {
     speed[i] += rampUpDelta[i];
+    Serial.print(speed[i]);
+    Serial.print(" u ");
+    Serial.println(position[i]);
     if (speed[i] < MIN_SPEED) {
       speed[i] = MIN_SPEED;
     }
@@ -414,12 +416,15 @@ void run_ramp(int i) {
   } else if (cruiseCounter[i] > 0) {
     if (speed[i] != cruiseSpeed[i]) {
       speed[i] = cruiseSpeed[i];
-      trigger[i] = (1000000 / cruiseSpeed[i]) / 128 - 1;
+      trigger[i] = (1000000 / speed[i]) / 128 - 1;
       counter[i] = 0;
     }
     cruiseCounter[i]--;
   } else if (rampDownCounter[i] > 0) {
     speed[i] -= rampDownDelta[i];
+    Serial.print(speed[i]);
+    Serial.print(" d ");
+    Serial.println(position[i]);
     if (speed[i] < MIN_SPEED) {
       speed[i] = MIN_SPEED;
     }
@@ -429,6 +434,14 @@ void run_ramp(int i) {
   }
 }
 
+void setup() {
+  initI2C();
+  resetSteppers();
+  setupTimer();
+
+  Serial.begin(9600);
+}
+
 void loop() {
   if (millis() - last_loop_time > LOOP_PERIOD_MS){
     last_loop_time = millis();
@@ -436,8 +449,8 @@ void loop() {
     for (char i=0; i<4; i++) {
       if (mode[i] == MODE_RUN_TO_TARGET_TIME) {
         run_to_target_time(i);
-      } else if (mode[i] == MODE_RUN_TO_TARGET_POS_W_RAMP) {
-        if (rampDownCounter == 0) {
+      } else if (mode[i] == MODE_RUN_TO_TARGET_TIME_W_RAMP) {
+        if (rampDownCounter[i] == 0) {
           trigger[i] = 0;
         }
         run_ramp(i);
