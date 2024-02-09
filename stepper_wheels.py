@@ -27,46 +27,46 @@ MODE_RUN_TILL_POSITION_WITH_RAMP = const(31)
 
 
 class Motor:
-    def __init__(self, controller, wheel):
+    def __init__(self, controller, index):
         self.controller = controller
-        self.wheel = wheel
+        self.index = index
         self.acceleration_up = DEFAULT_ACCELERATION
         self.acceleration_down = DEFAULT_ACCELERATION
 
     def set_trigger(self, trigger):
-        addr = self.wheel + TRIGGER_REG
+        addr = self.index + TRIGGER_REG
         self.controller.write(addr, struct.pack('<H', trigger))
 
     def get_trigger(self):
-        addr = self.wheel + TRIGGER_REG
+        addr = self.index + TRIGGER_REG
         return struct.unpack('<H', self.controller.read(addr, 2))[0]
 
     def set_direction(self, direction):
-        addr = self.wheel + DIRECTION_REG
+        addr = self.index + DIRECTION_REG
         self.controller.write(addr, struct.pack('B', direction))
 
     def get_direction(self):
-        addr = self.wheel + DIRECTION_REG
+        addr = self.index + DIRECTION_REG
         return struct.unpack('B', self.controller.read(addr, 1))[0]
 
     def set_mode(self, mode):
-        addr = self.wheel + MODE_REG
+        addr = self.index + MODE_REG
         self.controller.write(addr, struct.pack('B', mode))
 
     def get_mode(self):
-        addr = self.wheel + MODE_REG
+        addr = self.index + MODE_REG
         return struct.unpack('B', self.controller.read(addr, 1))[0]
 
     def set_position(self, position):
-        addr = self.wheel + POSITION_REG
+        addr = self.index + POSITION_REG
         self.controller.write(addr, struct.pack('<i', position))
 
     def get_position(self):
-        addr = self.wheel + POSITION_REG
+        addr = self.index + POSITION_REG
         return struct.unpack('<i', self.controller.read(addr, 4))[0]
 
     def set_target_position(self, position, relative=True):
-        addr = self.wheel + TARGET_POSITION_REG
+        addr = self.index + TARGET_POSITION_REG
         if relative:
             pos_type = 1
         else:
@@ -74,19 +74,19 @@ class Motor:
         self.controller.write(addr, struct.pack('<Bi', pos_type, position))
 
     def get_target_position(self):
-        addr = self.wheel + TARGET_POSITION_REG
+        addr = self.index + TARGET_POSITION_REG
         return struct.unpack('<i', self.controller.read(addr, 4))[0]
 
     def set_target_time(self, time_steps):
-        addr = self.wheel + TARGET_TIME_REG
+        addr = self.index + TARGET_TIME_REG
         self.controller.write(addr, struct.pack('<H', time_steps))
 
     def get_target_time(self):
-        addr = self.wheel + TARGET_TIME_REG
+        addr = self.index + TARGET_TIME_REG
         return struct.unpack('<H', self.controller.read(addr, 2))[0]
 
     def set_target_steps_with_ramp(self, steps, cruise_end_steps, up_count, up_delta, cruise_speed, down_count, down_delta):
-        addr = self.wheel + TARGET_STEPS_WITH_RAMP_REG
+        addr = self.index + TARGET_STEPS_WITH_RAMP_REG
         data = struct.pack(
             '<iiHHHHH',
             int(steps),
@@ -100,7 +100,7 @@ class Motor:
         self.controller.write(addr, data)
 
     def set_target_time_with_ramp(self, up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta):
-        addr = self.wheel + TARGET_TIME_WITH_RAMP_REG
+        addr = self.index + TARGET_TIME_WITH_RAMP_REG
         data = struct.pack(
             '<HHHHHH',
             int(up_count),
@@ -279,18 +279,18 @@ class Motor:
 
 
 class DriveBase:
-    def __init__(self, left_motor, right_motor):
+    def __init__(self, left_motors, right_motors):
         try:
-            iter(left_motor)
-            self.left_motors = left_motor
+            iter(left_motors)
+            self.left_motors = left_motors
         except:
-            self.left_motors = (left_motor)
+            self.left_motors = (left_motors, )
 
         try:
-            iter(right_motor)
-            self.right_motors = right_motor
+            iter(right_motors)
+            self.right_motors = right_motors
         except:
-            self.right_motors = (right_motor)
+            self.right_motors = (right_motors, )
 
     def move_tank(self, left_speed, right_speed):
         for motor in self.left_motors:
@@ -442,5 +442,22 @@ class Controller:
     def disable(self):
         self.write(ENABLE_REG, b'\x00')
 
-    def get_motor(self, wheel):
-        return Motor(self, wheel)
+    def get_motor(self, index):
+        return Motor(self, index)
+
+    def get_drive(self, left_motor_indexes, right_motor_indexes):
+        left_motors = []
+        right_motors = []
+        try:
+            for index in left_motor_indexes:
+                left_motors.append(self.get_motor(index))
+        except:
+            left_motors.append(self.get_motor(left_motor_indexes))
+
+        try:
+            for index in right_motor_indexes:
+                right_motors.append(self.get_motor(index))
+        except:
+            right_motors.append(self.get_motor(right_motor_indexes))
+
+        return DriveBase(left_motors, right_motors)
