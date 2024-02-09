@@ -94,21 +94,21 @@ Only used in "run till target time" mode.
 
 When read, it provides the remaining time to run.
 
-### Target Position with Ramp (0x59, 0x5A, 0x5B, 0x5C) (Int32, UInt16 * 6)
+### Target Steps with Ramp (0x59, 0x5A, 0x5B, 0x5C) (Int32, UInt16 * 6)
 Each address correspond to one stepper (X, Y, Z, A).
 
 The values to write are...
 
-* Int32: Target Position
-* Int32: Cruise End Position
+* Int32: Target Steps
+* Int32: Cruise End Steps
 * UInt16: Ramp-up Counter (units of 100ms)
 * UInt16: Ramp-up Delta (amount added to speed at each ramp-up interval)
 * UInt16: Cruise Speed (steps per second)
 * UInt16: Ramp-down Counter (units of 100ms)
 * UInt16: Ramp-down Delta (amount subtracted from speed at each ramp-down interval)
 
-Target position and Cruise End Position are always relative to the current position.
-When the target position is reached, the stepper will stop.
+Target Steps and Cruise End Steps are always relative to the current position.
+When the target number of steps is reached, the stepper will stop.
 
 Note that speed is always positive; if moving in reverse, direction must be set separately.
 
@@ -119,7 +119,7 @@ The stepper will then run at "Cruise Speed" for "Cruise Counter" * 100ms.
 Finally, the will reduce its speed by "Ramp-down Delta" and reduce "Ramp-down Counter" by one every 100ms, until "Ramp-down Counter" reaches zero.
 Speed will never drop below MIN_SPEED.
 
-This address is write-only, but the target position may be read using the Target Position address.
+This address is write-only, but the target position (...not target steps) may be read using the Target Position address.
 The speed may also be determined at any time by reading Trigger and calculating speed from it.
 
 ### Target Time with Ramp (0x5D, 0x5E, 0x5F, 0x60) (UInt16 * 6)

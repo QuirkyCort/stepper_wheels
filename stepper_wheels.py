@@ -15,7 +15,7 @@ MODE_REG = const(0x49)
 POSITION_REG = const(0x4D)
 TARGET_POSITION_REG = const(0x51)
 TARGET_TIME_REG = const(0x55)
-TARGET_POSITION_WITH_RAMP_REG = const(0x59)
+TARGET_STEPS_WITH_RAMP_REG = const(0x59)
 TARGET_TIME_WITH_RAMP_REG = const(0x5D)
 
 MODE_STOP = const(0)
@@ -85,12 +85,12 @@ class Motor:
         addr = self.wheel + TARGET_TIME_REG
         return struct.unpack('<H', self.controller.read(addr, 2))[0]
 
-    def set_target_position_with_ramp(self, position, cruise_end_position, up_count, up_delta, cruise_speed, down_count, down_delta):
-        addr = self.wheel + TARGET_POSITION_WITH_RAMP_REG
+    def set_target_steps_with_ramp(self, steps, cruise_end_steps, up_count, up_delta, cruise_speed, down_count, down_delta):
+        addr = self.wheel + TARGET_STEPS_WITH_RAMP_REG
         data = struct.pack(
             '<iiHHHHH',
-            int(position),
-            int(cruise_end_position),
+            int(steps),
+            int(cruise_end_steps),
             int(up_count),
             int(up_delta),
             int(cruise_speed),
@@ -165,12 +165,7 @@ class Motor:
         down_delta = speed // down_count
         self.set_target_time_with_ramp(up_count, up_delta, cruise_count, speed, down_count, down_delta)
 
-    def set_target_position_with_accel(self, speed, position):
-        if speed < 0:
-            direction = 1
-        else:
-            direction = 0
-        self.set_direction(direction)
+    def calc_target_steps_with_accel(self, speed, steps):
         speed = abs(speed)
 
         up_count = speed // self.acceleration_up
@@ -182,20 +177,29 @@ class Motor:
         up_ramp_dist = (up_delta + speed) // 2 * up_count * TIME_STEP_MS // 1000
         down_ramp_dist = (down_delta + speed) // 2 * (down_count - 1) * TIME_STEP_MS // 1000
 
-        if up_ramp_dist + down_ramp_dist >= position:
+        if up_ramp_dist + down_ramp_dist >= steps:
             a1 = self.acceleration_up
             a2 = self.acceleration_down
             freq = 1000 / TIME_STEP_MS
-            up_count = -(a1 ** 2 - (a1 * a2 * (a1 + a2) * (a1 + a2 + 2 * freq * position)) ** 0.5 + (a1 * a2)) / (a1 * (a1 + a2))
+            up_count = -(a1 ** 2 - (a1 * a2 * (a1 + a2) * (a1 + a2 + 2 * freq * steps)) ** 0.5 + (a1 * a2)) / (a1 * (a1 + a2))
             down_count = (a1 * up_count + a1 - a2) / a2
             up_count = round(up_count) + 1
             down_count = round(down_count)
-            self.set_target_position_with_ramp(position, 0, up_count, up_delta, speed, down_count, down_delta)
+            return steps, 0, up_count, up_delta, speed, down_count, down_delta
         else:
-            cruise_end_position = position - down_ramp_dist
-            self.set_target_position_with_ramp(position, cruise_end_position, up_count, up_delta, speed, down_count, down_delta)
+            cruise_end_steps = steps - down_ramp_dist
+            return steps, cruise_end_steps, up_count, up_delta, speed, down_count, down_delta
 
-    def set_target_position_with_ramp_time(self, speed, position, up_count, down_count):
+    def set_target_steps_with_accel(self, speed, steps):
+        if speed < 0:
+            direction = 1
+        else:
+            direction = 0
+        self.set_direction(direction)
+        settings = self.calc_target_steps_with_accel(speed, steps)
+        self.set_target_steps_with_ramp(*settings)
+
+    def set_target_steps_with_ramp_time(self, speed, steps, up_count, down_count):
         if speed < 0:
             direction = 1
         else:
@@ -209,10 +213,10 @@ class Motor:
         down_ramp_dist = (down_delta + speed) // 2 * (down_count - 1) * TIME_STEP_MS // 1000
 
         if direction == 0:
-            cruise_end_position = position - down_ramp_dist
+            cruise_end_steps = steps - down_ramp_dist
         else:
-            cruise_end_position = position + down_ramp_dist
-        self.set_target_position_with_ramp(position, cruise_end_position, up_count, up_delta, speed, down_count, down_delta)
+            cruise_end_steps = steps + down_ramp_dist
+        self.set_target_steps_with_ramp(steps, cruise_end_steps, up_count, up_delta, speed, down_count, down_delta)
 
     # User facing methods.
     # While the above methods may be public, the user should avoid using them and use the below methods instead.
@@ -224,7 +228,7 @@ class Motor:
         return self.get_position()
 
     def reset_steps(self, steps=0):
-        self.set_position(angle)
+        self.set_position(steps)
 
     def stop(self):
         self.set_trigger(0)
@@ -258,7 +262,7 @@ class Motor:
         steps = abs(steps)
 
         if ramp:
-            self.set_target_position_with_accel(speed, steps)
+            self.set_target_steps_with_accel(speed, steps)
             self.set_mode(MODE_RUN_TILL_POSITION_WITH_RAMP)
         else:
             self.set_speed(speed)
@@ -295,14 +299,55 @@ class MoveTank:
         for motor in self.right_motors:
             motor.run(right_speed)
 
-    def run_angle(self, left_speed, right_speed, angle):
+    def run_steps(self, left_speed, right_speed, steps):
+        if steps < 0:
+            left_speed = -left_speed
+            right_speed = -right_speed
+            steps = -steps
+
         left_speed_abs = abs(left_speed)
         right_speed_abs = abs(right_speed)
+        if left_speed_abs > right_speed_abs:
+            minor_steps = right_speed_abs * steps // left_speed_abs
+            major_settings = self.left_motors[0].calc_target_steps_with_accel(left_speed, steps)
+        else:
+            minor_steps = left_speed_abs * steps // right_speed_abs
+            major_settings = self.right_motors[0].calc_target_steps_with_accel(right_speed, steps)
+
+        minor_settings = list(major_settings)
+        minor_settings[0] = minor_steps
+        minor_settings[3] = minor_steps // minor_settings[2]
+        minor_settings[6] = minor_steps // minor_settings[5]
+        if minor_settings[1] != 0:
+            down_ramp_dist = (minor_settings[6] + right_speed_abs) // 2 * (minor_settings[5] - 1) * TIME_STEP_MS // 1000
+            cruise_end_steps = minor_steps - down_ramp_dist
+            minor_settings[1] / cruise_end_steps
+
+        if left_speed < 0:
+            left_direction = 1
+        else:
+            left_direction = 0
+
+        if right_speed < 0:
+            right_direction = 1
+        else:
+            right_direction = 0
 
         if left_speed_abs > right_speed_abs:
-            minor_angle = right_speed_abs / left_speed_abs * angle
+            for motor in self.left_motors:
+                motor.set_direction(left_direction)
+                motor.set_target_steps_with_ramp(*major_settings)
+            for motor in self.right_motors:
+                motor.set_direction(right_direction)
+                motor.set_target_steps_with_ramp(*minor_settings)
         else:
-            minor_angle = left_speed_abs / right_speed_abs * angle
+            for motor in self.left_motors:
+                motor.set_direction(left_direction)
+                motor.set_target_steps_with_ramp(*minor_settings)
+            for motor in self.right_motors:
+                motor.set_direction(right_direction)
+                motor.set_target_steps_with_ramp(*major_settings)
+
 
 
 class Controller:

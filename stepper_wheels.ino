@@ -134,7 +134,7 @@ void i2cRxHandler(int numBytes) {
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
 
-  // Target Position with Ramp
+  // Target Steps with Ramp
   } else if (registerPtr >= 0x59 && registerPtr <= 0x5C && numBytes == 19) {
     uint8_t index = registerPtr - 0x59;
 
