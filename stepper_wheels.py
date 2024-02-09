@@ -278,7 +278,7 @@ class Motor:
         self.run_steps(abs(speed), steps, ramp, wait)
 
 
-class MoveTank:
+class DriveBase:
     def __init__(self, left_motor, right_motor):
         try:
             iter(left_motor)
@@ -292,14 +292,14 @@ class MoveTank:
         except:
             self.right_motors = (right_motor)
 
-    def run(self, left_speed, right_speed):
+    def move_tank(self, left_speed, right_speed):
         for motor in self.left_motors:
             motor.run(left_speed)
 
         for motor in self.right_motors:
             motor.run(right_speed)
 
-    def run_steps(self, left_speed, right_speed, steps):
+    def move_tank_steps(self, left_speed, right_speed, steps, wait=True):
         if steps < 0:
             left_speed = -left_speed
             right_speed = -right_speed
@@ -348,6 +348,74 @@ class MoveTank:
                 motor.set_direction(right_direction)
                 motor.set_target_steps_with_ramp(*major_settings)
 
+        if wait:
+            for motor in self.left_motors:
+                motor.wait_till_stop()
+            for motor in self.right_motors:
+                motor.wait_till_stop()
+
+    def calc_steering(self, steer, speed):
+        if steer > 100:
+            steer = 100
+        elif steer < -100:
+            steer = -100
+
+        left_speed = speed
+        right_speed = speed
+
+        if steer >= 0:
+            right_speed = round(right_speed * (50 - steer) / 50)
+        else:
+            left_speed = round(left_speed * (50 + steer) / 50)
+
+        return left_speed, right_speed
+
+    def move_steering(self, steer, speed):
+        left_speed, right_speed = self.calc_steering(steer, speed)
+        self.move_tank(left_speed, right_speed)
+
+    def move_steering_steps(self, steer, speed, steps, wait=True):
+        left_speed, right_speed = self.calc_steering(steer, speed)
+        self.move_tank_steps(left_speed, right_speed, steps, wait)
+
+    def stop(self):
+        for motor in self.left_motors:
+            motor.stop()
+        for motor in self.right_motors:
+            motor.stop()
+
+    def reset_steps(self, steps=0):
+        for motor in self.left_motors:
+            motor.reset(steps)
+        for motor in self.right_motors:
+            motor.reset(steps)
+
+    def steps(self):
+        count = 0
+        total = 0
+        for motor in self.left_motors:
+            total += motor.steps()
+            count += 1
+        for motor in self.right_motors:
+            total += motor.steps()
+            count += 1
+        return total / count
+
+    def speed(self):
+        count = 0
+        left_speed = 0
+        for motor in self.left_motors:
+            left_speed += motor.speed()
+            count += 1
+        left_speed /= count
+
+        count = 0
+        right_speed = 0
+        for motor in self.right_motors:
+            right_speed += motor.speed()
+            count += 1
+        right_speed /= count
+        return left_speed, right_speed
 
 
 class Controller:
