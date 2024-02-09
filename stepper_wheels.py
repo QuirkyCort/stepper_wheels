@@ -143,64 +143,88 @@ class Motor:
         else:
             return -speed
 
-    def _run_time_no_ramp(self, speed, time):
-        self.set_speed(speed)
-        self.set_target_time(round(time * 1000 / TIME_STEP_MS))
-        self.set_mode(MODE_RUN_TILL_TIME)
-
-    def _run_time_ramp(self, speed, time):
-        if speed < 0:
-            direction = 1
-        else:
-            direction = 0
-        speed = abs(speed)
-        self.set_direction(direction)
-        self.set_target_time_with_accel(speed, time)
-        self.set_mode(MODE_RUN_TILL_TIME_WITH_RAMP)
-
     def set_target_time_with_accel(self, speed, time):
         total_time_steps = round(time * 1000 / TIME_STEP_MS)
         up_count = speed // self.acceleration_up
-        up_delta = speed // up_count
         down_count = speed // self.acceleration_down
-        down_delta = speed // down_count
         cruise_count = total_time_steps - up_count - down_count
-        cruise_speed = speed
-        self.set_target_time_with_ramp(up_count, up_delta, cruise_count, cruise_speed, down_count, down_delta)
+        if cruise_count < 0:
+            up_count -= -cruise_count * self.acceleration_up / (self.acceleration_up + self.acceleration_down)
+            down_count = total_time_steps - up_count
+        self.set_target_time_with_ramp_time(speed, up_count, cruise_count, down_count)
 
-    def _run_angle_no_ramp(self, speed, angle):
-        angle = abs(angle)
+    def set_target_time_with_ramp_time(self, speed, up_count, cruise_count, down_count):
         if speed < 0:
-            angle = -angle
-        self.set_speed(speed)
-        self.set_target_position(angle)
-        self.set_mode(MODE_RUN_TILL_POSITION)
-
-    def _run_angle_ramp(self, speed, angle):
-        if speed * angle < 0:
-            angle = -abs(angle)
             direction = 1
         else:
-            angle = abs(angle)
             direction = 0
         speed = abs(speed)
-
         self.set_direction(direction)
-        self.set_target_position_with_accel(speed, angle)
-        self.set_mode(MODE_RUN_TILL_POSITION_WITH_RAMP)
+
+        up_delta = speed // up_count
+        down_delta = speed // down_count
+        self.set_target_time_with_ramp(up_count, up_delta, cruise_count, speed, down_count, down_delta)
 
     def set_target_position_with_accel(self, speed, position):
+        if speed < 0:
+            direction = 1
+        else:
+            direction = 0
+        self.set_direction(direction)
+        speed = abs(speed)
+
         up_count = speed // self.acceleration_up
+        down_count = speed // self.acceleration_down
+
         up_delta = speed // up_count
-        down_count = speed // self.acceleration_down - 1
         down_delta = speed // down_count
-        down_ramp_dist = (down_delta + speed) // 2 * down_count * TIME_STEP_MS // 1000
-        cruise_end_position = position - down_ramp_dist
-        cruise_speed = speed
-        self.set_target_position_with_ramp(position, cruise_end_position, up_count, up_delta, cruise_speed, down_count, down_delta)
+
+        up_ramp_dist = (up_delta + speed) // 2 * up_count * TIME_STEP_MS // 1000
+        down_ramp_dist = (down_delta + speed) // 2 * (down_count - 1) * TIME_STEP_MS // 1000
+
+        if up_ramp_dist + down_ramp_dist >= position:
+            a1 = self.acceleration_up
+            a2 = self.acceleration_down
+            freq = 1000 / TIME_STEP_MS
+            up_count = -(a1 ** 2 - (a1 * a2 * (a1 + a2) * (a1 + a2 + 2 * freq * position)) ** 0.5 + (a1 * a2)) / (a1 * (a1 + a2))
+            down_count = (a1 * up_count + a1 - a2) / a2
+            up_count = round(up_count) + 1
+            down_count = round(down_count)
+            self.set_target_position_with_ramp(position, 0, up_count, up_delta, speed, down_count, down_delta)
+        else:
+            cruise_end_position = position - down_ramp_dist
+            self.set_target_position_with_ramp(position, cruise_end_position, up_count, up_delta, speed, down_count, down_delta)
+
+    def set_target_position_with_ramp_time(self, speed, position, up_count, down_count):
+        if speed < 0:
+            direction = 1
+        else:
+            direction = 0
+        self.set_direction(direction)
+        speed = abs(speed)
+
+        up_delta = speed // up_count
+        down_delta = speed // down_count
+
+        down_ramp_dist = (down_delta + speed) // 2 * (down_count - 1) * TIME_STEP_MS // 1000
+
+        if direction == 0:
+            cruise_end_position = position - down_ramp_dist
+        else:
+            cruise_end_position = position + down_ramp_dist
+        self.set_target_position_with_ramp(position, cruise_end_position, up_count, up_delta, speed, down_count, down_delta)
 
     # User facing methods.
     # While the above methods may be public, the user should avoid using them and use the below methods instead.
+
+    def speed(self):
+        return self.get_speed()
+
+    def steps(self):
+        return self.get_position()
+
+    def reset_steps(self, steps=0):
+        self.set_position(angle)
 
     def stop(self):
         self.set_trigger(0)
@@ -210,25 +234,44 @@ class Motor:
         self.set_speed(speed)
         self.set_mode(MODE_RUN_CONTIUOUS)
 
-    def speed(self):
-        return self.get_speed()
-
     def run_time(self, speed, time, ramp=True, wait=True):
+        if time <= 0:
+            return
         if ramp:
-            self._run_time_ramp(speed, time)
+            self.set_target_time_with_accel(speed, time)
+            self.set_mode(MODE_RUN_TILL_TIME_WITH_RAMP)
         else:
-            self._run_time_no_ramp(speed, time)
-        if wait:
-            self.wait_till_stop()
-
-    def run_angle(self, speed, angle, ramp=True, wait=True):
-        if ramp:
-            self._run_angle_ramp(speed, angle)
-        else:
-            self._run_angle_no_ramp(speed, angle)
+            self.set_speed(speed)
+            self.set_target_time(round(time * 1000 / TIME_STEP_MS))
+            self.set_mode(MODE_RUN_TILL_TIME)
 
         if wait:
             self.wait_till_stop()
+
+    def run_steps(self, speed, steps, ramp=True, wait=True):
+        if steps == 0:
+            return
+        if speed * steps < 0:
+            speed = -abs(speed)
+        else:
+            speed = abs(speed)
+        steps = abs(steps)
+
+        if ramp:
+            self.set_target_position_with_accel(speed, steps)
+            self.set_mode(MODE_RUN_TILL_POSITION_WITH_RAMP)
+        else:
+            self.set_speed(speed)
+            self.set_target_position(steps)
+            self.set_mode(MODE_RUN_TILL_POSITION)
+
+        if wait:
+            self.wait_till_stop()
+
+    def run_target(self, speed, target, ramp=True, wait=True):
+        current = self.get_position()
+        steps = target - current
+        self.run_steps(abs(speed), steps, ramp, wait)
 
 
 class MoveTank:
@@ -260,7 +303,6 @@ class MoveTank:
             minor_angle = right_speed_abs / left_speed_abs * angle
         else:
             minor_angle = left_speed_abs / right_speed_abs * angle
-
 
 
 class Controller:

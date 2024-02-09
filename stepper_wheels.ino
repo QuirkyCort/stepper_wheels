@@ -154,8 +154,8 @@ void i2cRxHandler(int numBytes) {
       targetPosition[index] += position[index];
       cruiseEndPosition[index] += position[index];
     } else {
-      targetPosition[index] = position[index] + targetPosition[index];
-      cruiseEndPosition[index] = position[index] + cruiseEndPosition[index];
+      targetPosition[index] = position[index] - targetPosition[index];
+      cruiseEndPosition[index] = position[index] - cruiseEndPosition[index];
     }
 
     bytes = (byte*)&rampUpCounter[index];
@@ -258,15 +258,11 @@ ISR(TIMER2_OVF_vect) {
     if (mode[0] >= MODE_RUN_TO_TARGET_POS) {
       if (direction[0] == 0) {
         if (position[0] >= targetPosition[0]) {
-          Serial.println("d0");
           trigger[0] = 0;
           mode[0] = MODE_STOP;
         }
       } else {
         if (position[0] <= targetPosition[0]) {
-          Serial.println(position[0]);
-          Serial.println(targetPosition[0]);
-          Serial.println("d1");
           trigger[0] = 0;
           mode[0] = MODE_STOP;
         }
@@ -435,7 +431,11 @@ void run_ramp_time(int i) {
     }
     cruiseCounter[i]--;
   } else if (rampDownCounter[i] > 0) {
-    speed[i] -= rampDownDelta[i];
+    if (speed[i] > rampDownDelta[i]) {
+      speed[i] -= rampDownDelta[i];
+    } else {
+      speed[i] = 0;
+    }
     if (speed[i] < MIN_SPEED) {
       speed[i] = MIN_SPEED;
     }
@@ -461,7 +461,11 @@ void run_ramp_pos(int i) {
       counter[i] = 0;
     }
   } else if (rampDownCounter[i] > 0) {
-    speed[i] -= rampDownDelta[i];
+    if (speed[i] > rampDownDelta[i]) {
+      speed[i] -= rampDownDelta[i];
+    } else {
+      speed[i] = 0;
+    }
     if (speed[i] < MIN_SPEED) {
       speed[i] = MIN_SPEED;
     }
@@ -489,6 +493,7 @@ void loop() {
       } else if (mode[i] == MODE_RUN_TO_TARGET_TIME_W_RAMP) {
         if (rampDownCounter[i] == 0) {
           trigger[i] = 0;
+          mode[i] = MODE_STOP;
         }
         run_ramp_time(i);
       } else if (mode[i] == MODE_RUN_TO_TARGET_POS_W_RAMP) {
