@@ -396,10 +396,8 @@ class Drive:
             motor.stop()
 
     def reset_steps(self, steps=0):
-        for motor in self.left_motors:
-            motor.reset(steps)
-        for motor in self.right_motors:
-            motor.reset(steps)
+        self.right_motors[0].reset(steps)
+        self.left_motors[0].reset(steps)
 
     def left_steps(self):
         return self.left_motors[0].steps()
