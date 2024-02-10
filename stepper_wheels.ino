@@ -228,7 +228,7 @@ void i2cReqHandler(void) {
 
   // Mode
   } else if (registerPtr >= 0x49 && registerPtr <= 0x4C) {
-    Wire.write(direction[registerPtr - 0x49]);
+    Wire.write(mode[registerPtr - 0x49]);
 
   // Position
   } else if (registerPtr >= 0x4D && registerPtr <= 0x50) {
@@ -284,12 +284,12 @@ ISR(TIMER2_OVF_vect) {
       if (direction[1] == 0) {
         if (position[1] >= targetPosition[1]) {
           trigger[1] = 0;
-          mode[0] = MODE_STOP;
+          mode[1] = MODE_STOP;
         }
       } else {
         if (position[1] <= targetPosition[1]) {
           trigger[1] = 0;
-          mode[0] = MODE_STOP;
+          mode[1] = MODE_STOP;
         }
       }
     }
@@ -309,12 +309,12 @@ ISR(TIMER2_OVF_vect) {
       if (direction[2] == 0) {
         if (position[2] >= targetPosition[2]) {
           trigger[2] = 0;
-          mode[0] = MODE_STOP;
+          mode[2] = MODE_STOP;
         }
       } else {
         if (position[2] <= targetPosition[2]) {
           trigger[2] = 0;
-          mode[0] = MODE_STOP;
+          mode[2] = MODE_STOP;
         }
       }
     }
@@ -334,12 +334,12 @@ ISR(TIMER2_OVF_vect) {
       if (direction[3] == 0) {
         if (position[3] >= targetPosition[3]) {
           trigger[3] = 0;
-          mode[0] = MODE_STOP;
+          mode[3] = MODE_STOP;
         }
       } else {
         if (position[3] <= targetPosition[3]) {
           trigger[3] = 0;
-          mode[0] = MODE_STOP;
+          mode[3] = MODE_STOP;
         }
       }
     }

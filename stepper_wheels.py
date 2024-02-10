@@ -19,7 +19,7 @@ TARGET_STEPS_WITH_RAMP_REG = const(0x59)
 TARGET_TIME_WITH_RAMP_REG = const(0x5D)
 
 MODE_STOP = const(0)
-MODE_RUN_CONTIUOUS = const(1)
+MODE_RUN_CONTINUOUS = const(1)
 MODE_RUN_TILL_TIME = const(20)
 MODE_RUN_TILL_TIME_WITH_RAMP = const(21)
 MODE_RUN_TILL_POSITION = const(30)
@@ -115,11 +115,14 @@ class Motor:
     # Following methods are derived from above methods
 
     def wait_till_stop(self):
-        while self.get_trigger() != 0:
+        while self.get_mode() != MODE_STOP:
             time.sleep_ms(WAIT_MS)
 
     def set_speed(self, speed):
-        if speed >=0:
+        if speed == 0:
+            self.set_trigger(0)
+            return
+        elif speed >0:
             direction = 0
         else:
             direction = 1
@@ -144,13 +147,15 @@ class Motor:
             return -speed
 
     def set_target_time_with_accel(self, speed, time):
+        abs_speed = abs(speed)
         total_time_steps = round(time * 1000 / TIME_STEP_MS)
-        up_count = speed // self.acceleration_up
-        down_count = speed // self.acceleration_down
+        up_count = abs_speed // self.acceleration_up
+        down_count = abs_speed // self.acceleration_down
         cruise_count = total_time_steps - up_count - down_count
         if cruise_count < 0:
-            up_count -= -cruise_count * self.acceleration_up / (self.acceleration_up + self.acceleration_down)
+            up_count = round(up_count + cruise_count * self.acceleration_up / (self.acceleration_up + self.acceleration_down))
             down_count = total_time_steps - up_count
+            cruise_count = 0
         self.set_target_time_with_ramp_time(speed, up_count, cruise_count, down_count)
 
     def set_target_time_with_ramp_time(self, speed, up_count, cruise_count, down_count):
@@ -161,9 +166,7 @@ class Motor:
         speed = abs(speed)
         self.set_direction(direction)
 
-        up_delta = speed // up_count
-        down_delta = speed // down_count
-        self.set_target_time_with_ramp(up_count, up_delta, cruise_count, speed, down_count, down_delta)
+        self.set_target_time_with_ramp(up_count, self.acceleration_up, cruise_count, speed, down_count, self.acceleration_down)
 
     def calc_target_steps_with_accel(self, speed, steps):
         speed = abs(speed)
@@ -171,8 +174,8 @@ class Motor:
         up_count = speed // self.acceleration_up
         down_count = speed // self.acceleration_down
 
-        up_delta = speed // up_count
-        down_delta = speed // down_count
+        up_delta = self.acceleration_up
+        down_delta = self.acceleration_down
 
         up_ramp_dist = (up_delta + speed) // 2 * up_count * TIME_STEP_MS // 1000
         down_ramp_dist = (down_delta + speed) // 2 * (down_count - 1) * TIME_STEP_MS // 1000
@@ -236,7 +239,7 @@ class Motor:
 
     def run(self, speed):
         self.set_speed(speed)
-        self.set_mode(MODE_RUN_CONTIUOUS)
+        self.set_mode(MODE_RUN_CONTINUOUS)
 
     def run_time(self, speed, time, ramp=True, wait=True):
         if time <= 0:
@@ -278,7 +281,7 @@ class Motor:
         self.run_steps(abs(speed), steps, ramp, wait)
 
 
-class DriveBase:
+class Drive:
     def __init__(self, left_motors, right_motors):
         try:
             iter(left_motors)
@@ -309,15 +312,19 @@ class DriveBase:
         right_speed_abs = abs(right_speed)
         if left_speed_abs > right_speed_abs:
             minor_steps = right_speed_abs * steps // left_speed_abs
+            minor_speed = right_speed_abs
             major_settings = self.left_motors[0].calc_target_steps_with_accel(left_speed, steps)
         else:
             minor_steps = left_speed_abs * steps // right_speed_abs
+            minor_speed = left_speed_abs
             major_settings = self.right_motors[0].calc_target_steps_with_accel(right_speed, steps)
 
         minor_settings = list(major_settings)
         minor_settings[0] = minor_steps
-        minor_settings[3] = minor_steps // minor_settings[2]
-        minor_settings[6] = minor_steps // minor_settings[5]
+        minor_settings[4] = minor_speed
+        minor_settings[3] = minor_speed // minor_settings[2]
+        minor_settings[6] = minor_speed // minor_settings[5]
+        minor_settings[1] = minor_steps - (minor_settings[6] + minor_speed) // 2 * (minor_settings[5] - 1) * TIME_STEP_MS // 1000
         if minor_settings[1] != 0:
             down_ramp_dist = (minor_settings[6] + right_speed_abs) // 2 * (minor_settings[5] - 1) * TIME_STEP_MS // 1000
             cruise_end_steps = minor_steps - down_ramp_dist
@@ -334,19 +341,23 @@ class DriveBase:
             right_direction = 0
 
         if left_speed_abs > right_speed_abs:
-            for motor in self.left_motors:
-                motor.set_direction(left_direction)
-                motor.set_target_steps_with_ramp(*major_settings)
-            for motor in self.right_motors:
-                motor.set_direction(right_direction)
-                motor.set_target_steps_with_ramp(*minor_settings)
+            left_settings = major_settings
+            right_settings = minor_settings
         else:
-            for motor in self.left_motors:
-                motor.set_direction(left_direction)
-                motor.set_target_steps_with_ramp(*minor_settings)
-            for motor in self.right_motors:
-                motor.set_direction(right_direction)
-                motor.set_target_steps_with_ramp(*major_settings)
+            left_settings = minor_settings
+            right_settings = major_settings
+
+        for motor in self.left_motors:
+            motor.set_direction(left_direction)
+            motor.set_target_steps_with_ramp(*left_settings)
+        for motor in self.right_motors:
+            motor.set_direction(right_direction)
+            motor.set_target_steps_with_ramp(*right_settings)
+
+        for motor in self.left_motors:
+            motor.set_mode(MODE_RUN_TILL_POSITION_WITH_RAMP)
+        for motor in self.right_motors:
+            motor.set_mode(MODE_RUN_TILL_POSITION_WITH_RAMP)
 
         if wait:
             for motor in self.left_motors:
@@ -390,33 +401,23 @@ class DriveBase:
         for motor in self.right_motors:
             motor.reset(steps)
 
-    def steps(self):
-        count = 0
-        total = 0
-        for motor in self.left_motors:
-            total += motor.steps()
-            count += 1
-        for motor in self.right_motors:
-            total += motor.steps()
-            count += 1
-        return total / count
+    def left_steps(self):
+        return self.left_motors[0].steps()
 
-    def speed(self):
-        count = 0
-        left_speed = 0
-        for motor in self.left_motors:
-            left_speed += motor.speed()
-            count += 1
-        left_speed /= count
+    def right_steps(self):
+        return self.right_motors[0].steps()
 
-        count = 0
-        right_speed = 0
-        for motor in self.right_motors:
-            right_speed += motor.speed()
-            count += 1
-        right_speed /= count
-        return left_speed, right_speed
+    def avg_steps(self):
+        return (self.left_steps() + self.right_steps()) / 2
 
+    def left_speed(self):
+        return self.left_motors[0].speed()
+
+    def right_speed(self):
+        return self.right_motors[0].speed()
+
+    def avg_speed(self):
+        return (self.left_speed() + self.right_speed()) / 2
 
 class Controller:
     def __init__(self, i2c, addr=0x55):
