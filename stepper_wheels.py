@@ -461,4 +461,4 @@ class Controller:
         except:
             right_motors.append(self.get_motor(right_motor_indexes))
 
-        return DriveBase(left_motors, right_motors)
+        return Drive(left_motors, right_motors)
