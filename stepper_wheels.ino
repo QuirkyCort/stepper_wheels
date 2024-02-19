@@ -69,7 +69,7 @@ void i2cRxHandler(int numBytes) {
     byte *bytes = (byte*)&trigger[registerPtr - 0x41];
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
-    counter[registerPtr - 0x41] = 0;
+    // counter[registerPtr - 0x41] = 0;
 
   // Direction
   } else if (registerPtr >= 0x45 && registerPtr <= 0x48 && numBytes == 2) {
@@ -247,7 +247,7 @@ void i2cReqHandler(void) {
 
 // Loop unrolled to save clock cycles. Not sure if that's really needed.
 ISR(TIMER2_OVF_vect) {
-  if (trigger[0] && counter[0] == trigger[0]) {
+  if (trigger[0] && counter[0] >= trigger[0]) {
     PORTD |= B00000100;
     counter[0] = 0;
     if (direction[0] == 0) {
@@ -272,7 +272,7 @@ ISR(TIMER2_OVF_vect) {
     PORTD &= B11111011;
   }
 
-  if (trigger[1] && counter[1] == trigger[1]) {
+  if (trigger[1] && counter[1] >= trigger[1]) {
     PORTD |= B00001000;
     counter[1] = 0;
     if (direction[1] == 0) {
@@ -297,7 +297,7 @@ ISR(TIMER2_OVF_vect) {
     PORTD &= B11110111;
   }
 
-  if (trigger[2] && counter[2] == trigger[2]) {
+  if (trigger[2] && counter[2] >= trigger[2]) {
     PORTD |= B00010000;
     counter[2] = 0;
     if (direction[2] == 0) {
@@ -322,7 +322,7 @@ ISR(TIMER2_OVF_vect) {
     PORTD &= B11101111;
   }
 
-  if (trigger[3] && counter[3] == trigger[3]) {
+  if (trigger[3] && counter[3] >= trigger[3]) {
     PORTB |= B00010000;
     counter[3] = 0;
     if (direction[3] == 0) {
@@ -421,13 +421,13 @@ void run_ramp_time(int i) {
       speed[i] = MIN_SPEED;
     }
     trigger[i] = (1000000 / speed[i]) / 128 - 1;
-    counter[i] = 0;
+    // counter[i] = 0;
     rampUpCounter[i]--;
   } else if (cruiseCounter[i] > 0) {
     if (speed[i] != cruiseSpeed[i]) {
       speed[i] = cruiseSpeed[i];
       trigger[i] = (1000000 / speed[i]) / 128 - 1;
-      counter[i] = 0;
+      // counter[i] = 0;
     }
     cruiseCounter[i]--;
   } else if (rampDownCounter[i] > 0) {
@@ -440,7 +440,7 @@ void run_ramp_time(int i) {
       speed[i] = MIN_SPEED;
     }
     trigger[i] = (1000000 / speed[i]) / 128 - 1;
-    counter[i] = 0;
+    // counter[i] = 0;
     rampDownCounter[i]--;
   }
 }
@@ -452,13 +452,13 @@ void run_ramp_pos(int i) {
       speed[i] = MIN_SPEED;
     }
     trigger[i] = (1000000 / speed[i]) / 128 - 1;
-    counter[i] = 0;
+    // counter[i] = 0;
     rampUpCounter[i]--;
   } else if ((direction[i] == 0 && position[i] < cruiseEndPosition[i]) || (direction[i] == 1 && position[i] > cruiseEndPosition[i])) {
     if (speed[i] != cruiseSpeed[i]) {
       speed[i] = cruiseSpeed[i];
       trigger[i] = (1000000 / speed[i]) / 128 - 1;
-      counter[i] = 0;
+      // counter[i] = 0;
     }
   } else if (rampDownCounter[i] > 0) {
     if (speed[i] > rampDownDelta[i]) {
@@ -470,7 +470,7 @@ void run_ramp_pos(int i) {
       speed[i] = MIN_SPEED;
     }
     trigger[i] = (1000000 / speed[i]) / 128 - 1;
-    counter[i] = 0;
+    // counter[i] = 0;
     rampDownCounter[i]--;
   }
 }
