@@ -1,0 +1,22 @@
+#define ENABLE_PORT PORTB
+#define ENABLE_SET B00000001
+
+#define X_DIR_PORT PORTD
+#define Y_DIR_PORT PORTD
+#define Z_DIR_PORT PORTD
+#define A_DIR_PORT PORTB
+
+#define X_STEP_PORT PORTD
+#define Y_STEP_PORT PORTD
+#define Z_STEP_PORT PORTD
+#define A_STEP_PORT PORTB
+
+#define X_DIR_SET B00000100  // Pin 2
+#define Y_DIR_SET B00001000  // Pin 3
+#define Z_DIR_SET B00010000  // Pin 4
+#define A_DIR_SET B00010000  // Pin 12
+
+#define X_STEP_SET B00100000  // Pin 5
+#define Y_STEP_SET B01000000  // Pin 6
+#define Z_STEP_SET B10000000  // Pin 7
+#define A_STEP_SET B00100000  // Pin 13

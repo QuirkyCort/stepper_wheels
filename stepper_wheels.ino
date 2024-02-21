@@ -1,5 +1,17 @@
 #include <Wire.h>
 
+// Select board type
+// #define BOARD_CNC_SHIELD_V3_0
+#define BOARD_HW_702
+
+#ifdef BOARD_CNC_SHIELD_V3_0
+  #include "cnc_shield_v3_0.h"
+#endif
+
+#ifdef BOARD_HW_702
+  #include "hw_702.h"
+#endif
+
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 1
 #define PATCH_VERSION 1
@@ -57,10 +69,10 @@ void i2cRxHandler(int numBytes) {
   // Enable
   } else if (registerPtr == 0x2 && numBytes == 2) {
     if (Wire.read() == 0x1) {
-      PORTB &= B11111110;
+      ENABLE_PORT &= ~ENABLE_SET;
       enable = 1;
     } else {
-      PORTB |= B00000001;
+      ENABLE_PORT |= ENABLE_SET;
       enable = 0;
     }
 
@@ -76,27 +88,27 @@ void i2cRxHandler(int numBytes) {
     direction[registerPtr - 0x45] = Wire.read();
     if (registerPtr == 0x45) {
       if (direction[0] == 1) {
-        PORTD |= B00100000;
+        X_DIR_PORT |= X_DIR_SET;
       } else {
-        PORTD &= B11011111;
+        X_DIR_PORT &= ~X_DIR_SET;
       }
     } else if (registerPtr == 0x46) {
       if (direction[1] == 1) {
-        PORTD |= B01000000;
+        Y_DIR_PORT |= Y_DIR_SET;
       } else {
-        PORTD &= B10111111;
+        Y_DIR_PORT &= ~Y_DIR_SET;
       }
     } else if (registerPtr == 0x47) {
       if (direction[2] == 1) {
-        PORTD |= B10000000;
+        Z_DIR_PORT |= Z_DIR_SET;
       } else {
-        PORTD &= B01111111;
+        Z_DIR_PORT &= ~Z_DIR_SET;
       }
     } else if (registerPtr == 0x48) {
       if (direction[3] == 1) {
-        PORTB |= B00100000;
+        A_DIR_PORT |= A_DIR_SET;
       } else {
-        PORTB &= B11011111;
+        A_DIR_PORT &= ~A_DIR_SET;
       }
     }
 
@@ -248,7 +260,7 @@ void i2cReqHandler(void) {
 // Loop unrolled to save clock cycles. Not sure if that's really needed.
 ISR(TIMER2_OVF_vect) {
   if (trigger[0] && counter[0] >= trigger[0]) {
-    PORTD |= B00000100;
+    X_STEP_PORT |= X_STEP_SET;
     counter[0] = 0;
     if (direction[0] == 0) {
       position[0]++;
@@ -269,11 +281,11 @@ ISR(TIMER2_OVF_vect) {
       }
     }
   } else {
-    PORTD &= B11111011;
+    X_STEP_PORT &= ~X_STEP_SET;
   }
 
   if (trigger[1] && counter[1] >= trigger[1]) {
-    PORTD |= B00001000;
+    Y_STEP_PORT |= Y_STEP_SET;
     counter[1] = 0;
     if (direction[1] == 0) {
       position[1]++;
@@ -294,11 +306,11 @@ ISR(TIMER2_OVF_vect) {
       }
     }
   } else {
-    PORTD &= B11110111;
+    Y_STEP_PORT &= ~Y_STEP_SET;
   }
 
   if (trigger[2] && counter[2] >= trigger[2]) {
-    PORTD |= B00010000;
+    Z_STEP_PORT |= Z_STEP_SET;
     counter[2] = 0;
     if (direction[2] == 0) {
       position[2]++;
@@ -319,11 +331,11 @@ ISR(TIMER2_OVF_vect) {
       }
     }
   } else {
-    PORTD &= B11101111;
+    Z_STEP_PORT &= ~Z_STEP_SET;
   }
 
   if (trigger[3] && counter[3] >= trigger[3]) {
-    PORTB |= B00010000;
+    A_STEP_PORT |= A_STEP_SET;
     counter[3] = 0;
     if (direction[3] == 0) {
       position[3]++;
@@ -344,7 +356,7 @@ ISR(TIMER2_OVF_vect) {
       }
     }
   } else {
-    PORTD &= B11101111;
+    A_STEP_PORT &= ~A_STEP_SET;
   }
 
   counter[0]++;
