@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include "AccelStepper.h"
 
 // Select board type
 // #define BOARD_CNC_SHIELD_V3_0
@@ -16,399 +17,207 @@
 #define MINOR_VERSION 1
 #define PATCH_VERSION 1
 
-#define I2C_ADDRESS 0x55
-
-#define LOOP_PERIOD_MS 100
-#define MIN_SPEED 10
-
 #define TARGET_POS_TYPE_SET 0
 #define TARGET_POS_TYPE_ADD 1
 
 #define MODE_STOP 0
 #define MODE_RUN_CONTINUOUS 1
-#define MODE_RUN_TO_TARGET_TIME 20
-#define MODE_RUN_TO_TARGET_TIME_W_RAMP 21
-#define MODE_RUN_TO_TARGET_POS 30
-#define MODE_RUN_TO_TARGET_POS_W_RAMP 31
+#define MODE_RUN_TO_POS 30
+#define MODE_RUN_TO_POS_W_RAMP 31
 
+#define I2C_ADDRESS 0x55
+
+#define VERSION_REGISTER 0x00
+#define RESET_REGISTER 0x01
+#define ENABLE_REGISTER 0x02
+#define STOP_REGISTER 0x20
+#define RUN_CONTINUOUS_REGISTER 0x30
+#define RUN_TO_POS_REGISTER 0x40
+#define RUN_TO_POS_W_RAMP_REGISTER 0x50
+#define POSITION_REGISTER 0x60
+#define SPEED_REGISTER 0x70
+#define ACCELERATION_REGISTER 0x80
+#define RUNNING_REGISTER 0x90
 
 const byte VERSION[] = { MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION };
 
 volatile uint8_t registerPtr = 0;
 
-volatile uint16_t counter[4];
-
-volatile uint8_t enable;
-volatile uint16_t trigger[4];
-volatile uint8_t direction[4];
+AccelStepper steppers[4] = {
+    AccelStepper(AccelStepper::DRIVER, X_STEP, X_DIR),
+    AccelStepper(AccelStepper::DRIVER, Y_STEP, Y_DIR),
+    AccelStepper(AccelStepper::DRIVER, Z_STEP, Z_DIR),
+    AccelStepper(AccelStepper::DRIVER, A_STEP, A_DIR)
+};
 volatile uint8_t mode[4];
-volatile int32_t position[4];
-volatile int32_t targetPosition[4];
-volatile uint16_t targetTime[4];
-
-volatile uint16_t speed[4];
-volatile uint16_t rampUpCounter[4];
-volatile uint16_t rampUpDelta[4];
-volatile int32_t cruiseEndPosition[4];
-volatile uint16_t cruiseCounter[4];
-volatile uint16_t cruiseSpeed[4];
-volatile uint16_t rampDownCounter[4];
-volatile uint16_t rampDownDelta[4];
-
-unsigned long last_loop_time = 0;
 
 void i2cRxHandler(int numBytes) {
   registerPtr = Wire.read(); // First byte always sets ptr
 
   // Reset
-  if (registerPtr == 0x1 && numBytes == 2) {
+  if (registerPtr == RESET_REGISTER && numBytes == 2) {
     if (Wire.read() == 0x1) {
       resetSteppers();
     }
 
   // Enable
-  } else if (registerPtr == 0x2 && numBytes == 2) {
+  } else if (registerPtr == ENABLE_REGISTER && numBytes == 2) {
     if (Wire.read() == 0x1) {
       ENABLE_PORT &= ~ENABLE_SET;
-      enable = 1;
     } else {
       ENABLE_PORT |= ENABLE_SET;
-      enable = 0;
     }
 
-  // Trigger
-  } else if (registerPtr >= 0x41 && registerPtr <= 0x44 && numBytes == 3) {
-    byte *bytes = (byte*)&trigger[registerPtr - 0x41];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    // counter[registerPtr - 0x41] = 0;
-
-  // Direction
-  } else if (registerPtr >= 0x45 && registerPtr <= 0x48 && numBytes == 2) {
-    direction[registerPtr - 0x45] = Wire.read();
-    if (registerPtr == 0x45) {
-      if (direction[0] == 1) {
-        X_DIR_PORT |= X_DIR_SET;
-      } else {
-        X_DIR_PORT &= ~X_DIR_SET;
-      }
-    } else if (registerPtr == 0x46) {
-      if (direction[1] == 1) {
-        Y_DIR_PORT |= Y_DIR_SET;
-      } else {
-        Y_DIR_PORT &= ~Y_DIR_SET;
-      }
-    } else if (registerPtr == 0x47) {
-      if (direction[2] == 1) {
-        Z_DIR_PORT |= Z_DIR_SET;
-      } else {
-        Z_DIR_PORT &= ~Z_DIR_SET;
-      }
-    } else if (registerPtr == 0x48) {
-      if (direction[3] == 1) {
-        A_DIR_PORT |= A_DIR_SET;
-      } else {
-        A_DIR_PORT &= ~A_DIR_SET;
-      }
+  // Stop
+  } else if (registerPtr >= STOP_REGISTER && registerPtr < STOP_REGISTER + 4 && numBytes == 2) {
+    uint8_t index = registerPtr - STOP_REGISTER;
+    if (Wire.read() == 0x1) {
+      mode[index] = MODE_STOP;
+      steppers[index].move(0);
+      steppers[index].setSpeed(0);
     }
 
-  // Mode
-  } else if (registerPtr >= 0x49 && registerPtr <= 0x4C && numBytes == 2) {
-    uint8_t index = registerPtr - 0x49;
-    mode[index] = Wire.read();
+  // Run continuous
+  } else if (registerPtr >= RUN_CONTINUOUS_REGISTER && registerPtr < RUN_CONTINUOUS_REGISTER + 4 && numBytes == 5) {
+    uint8_t index = registerPtr - RUN_CONTINUOUS_REGISTER;
+    float speed;
 
-  // Position
-  } else if (registerPtr >= 0x4D && registerPtr <= 0x50 && numBytes == 5) {
-    byte *bytes = (byte*)&position[registerPtr - 0x4D];
+    byte *bytes = (byte*)&speed;
+    bytes[0] = Wire.read();
+    bytes[1] = Wire.read();
+    bytes[2] = Wire.read();
+    bytes[3] = Wire.read();
+    steppers[index].setSpeed(speed);
+    mode[index] = MODE_RUN_CONTINUOUS;
+
+  // Run to target position without ramp
+  } else if (registerPtr >= RUN_TO_POS_REGISTER && registerPtr < RUN_TO_POS_REGISTER + 4 && numBytes == 10) {
+    uint8_t index = registerPtr - RUN_TO_POS_REGISTER;
+    float speed;
+    uint8_t rel;
+    int32_t position;
+
+    byte *bytes = (byte*)&speed;
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
     bytes[2] = Wire.read();
     bytes[3] = Wire.read();
 
-  // Target Position
-  } else if (registerPtr >= 0x51 && registerPtr <= 0x54 && numBytes == 6) {
-    uint8_t type = Wire.read();
-    uint8_t index = registerPtr - 0x51;
+    rel = Wire.read();
 
-    byte *bytes = (byte*)&targetPosition[index];
+    bytes = (byte*)&position;
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
     bytes[2] = Wire.read();
     bytes[3] = Wire.read();
 
-    if (type == TARGET_POS_TYPE_ADD) {
-      targetPosition[index] += position[index];
-    }
-
-  // Target Time
-  } else if (registerPtr >= 0x55 && registerPtr <= 0x58 && numBytes == 3) {
-    byte *bytes = (byte*)&targetTime[registerPtr - 0x55];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-
-  // Target Steps with Ramp
-  } else if (registerPtr >= 0x59 && registerPtr <= 0x5C && numBytes == 19) {
-    uint8_t index = registerPtr - 0x59;
-
-    byte *bytes = (byte*)&targetPosition[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
-
-    bytes = (byte*)&cruiseEndPosition[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
-
-    if (direction[index] == 0) {
-      targetPosition[index] += position[index];
-      cruiseEndPosition[index] += position[index];
+    if (rel) {
+      steppers[index].move(position);
     } else {
-      targetPosition[index] = position[index] - targetPosition[index];
-      cruiseEndPosition[index] = position[index] - cruiseEndPosition[index];
+      steppers[index].moveTo(position);
     }
+    steppers[index].setSpeed(speed);
+    mode[index] = MODE_RUN_TO_POS;
 
-    bytes = (byte*)&rampUpCounter[index];
+  // Run to target position with ramp
+  } else if (registerPtr >= RUN_TO_POS_W_RAMP_REGISTER && registerPtr < RUN_TO_POS_W_RAMP_REGISTER + 4 && numBytes == 10) {
+    uint8_t index = registerPtr - RUN_TO_POS_W_RAMP_REGISTER;
+    float speed;
+    uint8_t rel;
+    int32_t position;
+
+    byte *bytes = (byte*)&speed;
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
+    bytes[2] = Wire.read();
+    bytes[3] = Wire.read();
 
-    bytes = (byte*)&rampUpDelta[index];
+    rel = Wire.read();
+
+    bytes = (byte*)&position;
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
+    bytes[2] = Wire.read();
+    bytes[3] = Wire.read();
 
-    bytes = (byte*)&cruiseSpeed[index];
+    if (rel) {
+      steppers[index].move(position);
+    } else {
+      steppers[index].moveTo(position);
+    }
+    steppers[index].setMaxSpeed(speed);
+    mode[index] = MODE_RUN_TO_POS_W_RAMP;
+
+  // Set position
+  } else if (registerPtr >= POSITION_REGISTER && registerPtr < POSITION_REGISTER + 4 && numBytes == 5) {
+    uint8_t index = registerPtr - POSITION_REGISTER;
+    int32_t position;
+
+    byte *bytes = (byte*)&position;
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
+    bytes[2] = Wire.read();
+    bytes[3] = Wire.read();
 
-    bytes = (byte*)&rampDownCounter[index];
+    steppers[index].setCurrentPosition(position);
+
+  // Set acceleration
+  } else if (registerPtr >= ACCELERATION_REGISTER && registerPtr < ACCELERATION_REGISTER + 4 && numBytes == 5) {
+    uint8_t index = registerPtr - ACCELERATION_REGISTER;
+    float acceleration;
+
+    byte *bytes = (byte*)&acceleration;
     bytes[0] = Wire.read();
     bytes[1] = Wire.read();
+    bytes[2] = Wire.read();
+    bytes[3] = Wire.read();
 
-    bytes = (byte*)&rampDownDelta[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-
-    speed[index] = 0;
-
-  // Target Time with Ramp
-  } else if (registerPtr >= 0x5D && registerPtr <= 0x60 && numBytes == 13) {
-    uint8_t index = registerPtr - 0x5D;
-
-    byte *bytes = (byte*)&rampUpCounter[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-
-    bytes = (byte*)&rampUpDelta[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-
-    bytes = (byte*)&cruiseCounter[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-
-    bytes = (byte*)&cruiseSpeed[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-
-    bytes = (byte*)&rampDownCounter[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-
-    bytes = (byte*)&rampDownDelta[index];
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-
-    speed[index] = 0;
+    steppers[index].setAcceleration(acceleration);
   }
 
 }
 
 void i2cReqHandler(void) {
   // Version
-  if (registerPtr == 0) {
+  if (registerPtr == VERSION_REGISTER) {
     Wire.write(VERSION, 3);
 
-  // Trigger
-  } else if (registerPtr >= 0x41 && registerPtr <= 0x44) {
-    Wire.write((byte*)&trigger[registerPtr - 0x41], 2);
-
-  // Direction
-  } else if (registerPtr >= 0x45 && registerPtr <= 0x48) {
-    Wire.write(direction[registerPtr - 0x45]);
-
-  // Mode
-  } else if (registerPtr >= 0x49 && registerPtr <= 0x4C) {
-    Wire.write(mode[registerPtr - 0x49]);
-
   // Position
-  } else if (registerPtr >= 0x4D && registerPtr <= 0x50) {
-    Wire.write((byte*)&position[registerPtr - 0x4D], 4);
+  } else if (registerPtr >= POSITION_REGISTER && registerPtr < POSITION_REGISTER + 4) {
+    uint8_t index = registerPtr - POSITION_REGISTER;
+    int32_t position = steppers[index].currentPosition();
+    Wire.write((byte*)&position, 4);
 
-  // Target Position
-  } else if (registerPtr >= 0x51 && registerPtr <= 0x54) {
-    Wire.write((byte*)&targetPosition[registerPtr - 0x51], 4);
+  // Speed
+  } else if (registerPtr >= SPEED_REGISTER && registerPtr < SPEED_REGISTER + 4) {
+    uint8_t index = registerPtr - SPEED_REGISTER;
+    float speed = steppers[index].speed();
+    Wire.write((byte*)&speed, 4);
 
-  // Target Time
-  } else if (registerPtr >= 0x55 && registerPtr <= 0x58) {
-    Wire.write((byte*)&targetTime[registerPtr - 0x51], 2);
+  // Running
+  } else if (registerPtr >= RUNNING_REGISTER && registerPtr < RUNNING_REGISTER + 4) {
+    uint8_t index = registerPtr - RUNNING_REGISTER;
+    char running = steppers[index].isRunning();
+
+    Wire.write(running);
 
   }
-}
-
-// Loop unrolled to save clock cycles. Not sure if that's really needed.
-ISR(TIMER2_OVF_vect) {
-  if (trigger[0] && counter[0] >= trigger[0]) {
-    X_STEP_PORT |= X_STEP_SET;
-    counter[0] = 0;
-    if (direction[0] == 0) {
-      position[0]++;
-    } else {
-      position[0]--;
-    }
-    if (mode[0] >= MODE_RUN_TO_TARGET_POS) {
-      if (direction[0] == 0) {
-        if (position[0] >= targetPosition[0]) {
-          trigger[0] = 0;
-          mode[0] = MODE_STOP;
-        }
-      } else {
-        if (position[0] <= targetPosition[0]) {
-          trigger[0] = 0;
-          mode[0] = MODE_STOP;
-        }
-      }
-    }
-  } else {
-    X_STEP_PORT &= ~X_STEP_SET;
-  }
-
-  if (trigger[1] && counter[1] >= trigger[1]) {
-    Y_STEP_PORT |= Y_STEP_SET;
-    counter[1] = 0;
-    if (direction[1] == 0) {
-      position[1]++;
-    } else {
-      position[1]--;
-    }
-    if (mode[1] >= MODE_RUN_TO_TARGET_POS) {
-      if (direction[1] == 0) {
-        if (position[1] >= targetPosition[1]) {
-          trigger[1] = 0;
-          mode[1] = MODE_STOP;
-        }
-      } else {
-        if (position[1] <= targetPosition[1]) {
-          trigger[1] = 0;
-          mode[1] = MODE_STOP;
-        }
-      }
-    }
-  } else {
-    Y_STEP_PORT &= ~Y_STEP_SET;
-  }
-
-  if (trigger[2] && counter[2] >= trigger[2]) {
-    Z_STEP_PORT |= Z_STEP_SET;
-    counter[2] = 0;
-    if (direction[2] == 0) {
-      position[2]++;
-    } else {
-      position[2]--;
-    }
-    if (mode[2] >= MODE_RUN_TO_TARGET_POS) {
-      if (direction[2] == 0) {
-        if (position[2] >= targetPosition[2]) {
-          trigger[2] = 0;
-          mode[2] = MODE_STOP;
-        }
-      } else {
-        if (position[2] <= targetPosition[2]) {
-          trigger[2] = 0;
-          mode[2] = MODE_STOP;
-        }
-      }
-    }
-  } else {
-    Z_STEP_PORT &= ~Z_STEP_SET;
-  }
-
-  if (trigger[3] && counter[3] >= trigger[3]) {
-    A_STEP_PORT |= A_STEP_SET;
-    counter[3] = 0;
-    if (direction[3] == 0) {
-      position[3]++;
-    } else {
-      position[3]--;
-    }
-    if (mode[3] >= MODE_RUN_TO_TARGET_POS) {
-      if (direction[3] == 0) {
-        if (position[3] >= targetPosition[3]) {
-          trigger[3] = 0;
-          mode[3] = MODE_STOP;
-        }
-      } else {
-        if (position[3] <= targetPosition[3]) {
-          trigger[3] = 0;
-          mode[3] = MODE_STOP;
-        }
-      }
-    }
-  } else {
-    A_STEP_PORT &= ~A_STEP_SET;
-  }
-
-  counter[0]++;
-  counter[1]++;
-  counter[2]++;
-  counter[3]++;
-}
-
-void setupTimer() {
-  TCCR2A = 0;           // Init Timer2
-  TCCR2B = B00000010;   // Prescaler = 8
-  TIMSK2 = B00000001;   // Enable Timer Overflow Interrupt
 }
 
 void initPins() {
-  pinMode(2, OUTPUT); // X step
-  digitalWrite(2, 0);
-
-  pinMode(5, OUTPUT); // X direction
-  digitalWrite(5, 0);
-
-  pinMode(3, OUTPUT); // Y step
-  digitalWrite(3, 0);
-
-  pinMode(6, OUTPUT); // Y direction
-  digitalWrite(6, 0);
-
-  pinMode(4, OUTPUT); // Z step
-  digitalWrite(4, 0);
-
-  pinMode(7, OUTPUT); // Z direction
-  digitalWrite(8, 0);
-
-  pinMode(12, OUTPUT); // A step
-  digitalWrite(12, 0);
-
-  pinMode(13, OUTPUT); // A direction
-  digitalWrite(13, 0);
-
   pinMode(8, OUTPUT); // Enable
   digitalWrite(9, 0); // LOW to enable
-  enable = 1;
 }
 
 void resetSteppers() {
   initPins();
   for (char i=0; i<4; i++) {
-    trigger[i] = 0;
-    direction[i] = 0;
-    mode[i] = 0;
-    position[i] = 0;
-    targetPosition[i] = 0;
+    steppers[i].setCurrentPosition(0);
+    steppers[i].moveTo(0);
+    steppers[i].setSpeed(0);
+    steppers[i].setAcceleration(1);
+    steppers[i].setMaxSpeed(1);
+    mode[i] = MODE_STOP;
   }
 }
 
@@ -418,99 +227,21 @@ void initI2C() {
   Wire.onRequest(i2cReqHandler);
 }
 
-void run_to_target_time(int i) {
-  if (targetTime[i] == 0) {
-    trigger[i] = 0;
-  } else {
-    targetTime[i]--;
-  }
-}
-
-void run_ramp_time(int i) {
-  if (rampUpCounter[i] > 0) {
-    speed[i] += rampUpDelta[i];
-    if (speed[i] < MIN_SPEED) {
-      speed[i] = MIN_SPEED;
-    }
-    trigger[i] = (1000000 / speed[i]) / 128 - 1;
-    // counter[i] = 0;
-    rampUpCounter[i]--;
-  } else if (cruiseCounter[i] > 0) {
-    if (speed[i] != cruiseSpeed[i]) {
-      speed[i] = cruiseSpeed[i];
-      trigger[i] = (1000000 / speed[i]) / 128 - 1;
-      // counter[i] = 0;
-    }
-    cruiseCounter[i]--;
-  } else if (rampDownCounter[i] > 0) {
-    if (speed[i] > rampDownDelta[i]) {
-      speed[i] -= rampDownDelta[i];
-    } else {
-      speed[i] = 0;
-    }
-    if (speed[i] < MIN_SPEED) {
-      speed[i] = MIN_SPEED;
-    }
-    trigger[i] = (1000000 / speed[i]) / 128 - 1;
-    // counter[i] = 0;
-    rampDownCounter[i]--;
-  }
-}
-
-void run_ramp_pos(int i) {
-  if (rampUpCounter[i] > 0) {
-    speed[i] += rampUpDelta[i];
-    if (speed[i] < MIN_SPEED) {
-      speed[i] = MIN_SPEED;
-    }
-    trigger[i] = (1000000 / speed[i]) / 128 - 1;
-    // counter[i] = 0;
-    rampUpCounter[i]--;
-  } else if ((direction[i] == 0 && position[i] < cruiseEndPosition[i]) || (direction[i] == 1 && position[i] > cruiseEndPosition[i])) {
-    if (speed[i] != cruiseSpeed[i]) {
-      speed[i] = cruiseSpeed[i];
-      trigger[i] = (1000000 / speed[i]) / 128 - 1;
-      // counter[i] = 0;
-    }
-  } else if (rampDownCounter[i] > 0) {
-    if (speed[i] > rampDownDelta[i]) {
-      speed[i] -= rampDownDelta[i];
-    } else {
-      speed[i] = 0;
-    }
-    if (speed[i] < MIN_SPEED) {
-      speed[i] = MIN_SPEED;
-    }
-    trigger[i] = (1000000 / speed[i]) / 128 - 1;
-    // counter[i] = 0;
-    rampDownCounter[i]--;
-  }
-}
-
 void setup() {
   initI2C();
   resetSteppers();
-  setupTimer();
 
   Serial.begin(9600);
 }
 
 void loop() {
-  if (millis() - last_loop_time > LOOP_PERIOD_MS){
-    last_loop_time += LOOP_PERIOD_MS;
-
-    for (char i=0; i<4; i++) {
-      if (mode[i] == MODE_RUN_TO_TARGET_TIME) {
-        run_to_target_time(i);
-      } else if (mode[i] == MODE_RUN_TO_TARGET_TIME_W_RAMP) {
-        if (rampDownCounter[i] == 0) {
-          trigger[i] = 0;
-          mode[i] = MODE_STOP;
-        }
-        run_ramp_time(i);
-      } else if (mode[i] == MODE_RUN_TO_TARGET_POS_W_RAMP) {
-        run_ramp_pos(i);
-      }
+  for (int i=0; i<4; i++) {
+    if (mode[i] == MODE_RUN_CONTINUOUS) {
+      steppers[i].runSpeed();
+    } else if (mode[i] == MODE_RUN_TO_POS) {
+      steppers[i].runSpeedToPosition();
+    } else if (mode[i] == MODE_RUN_TO_POS_W_RAMP) {
+      steppers[i].run();
     }
   }
 }
