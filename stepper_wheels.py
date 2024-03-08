@@ -112,6 +112,8 @@ class Motor:
 
 class Drive:
     def __init__(self, left_motors, right_motors):
+        self._acceleration = 0
+
         try:
             iter(left_motors)
             self.left_motors = left_motors
@@ -124,7 +126,6 @@ class Drive:
         except:
             self.right_motors = (right_motors, )
 
-        self._acceleration = 0
         self.set_acceleration(DEFAULT_ACCELERATION, forced=True)
 
     def _set_left_acceleration(self, acceleration):
