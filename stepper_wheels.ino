@@ -2,8 +2,8 @@
 #include "AccelStepper.h"
 
 // Select board type
-// #define BOARD_CNC_SHIELD_V3_0
-#define BOARD_HW_702
+#define BOARD_CNC_SHIELD_V3_0
+// #define BOARD_HW_702
 
 #ifdef BOARD_CNC_SHIELD_V3_0
   #include "cnc_shield_v3_0.h"
@@ -111,6 +111,7 @@ void i2cRxHandler(int numBytes) {
     bytes[2] = Wire.read();
     bytes[3] = Wire.read();
 
+    steppers[index].setMaxSpeed(speed);
     if (rel) {
       steppers[index].move(position);
     } else {

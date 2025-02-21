@@ -645,7 +645,10 @@ void AccelStepper::runToPosition()
 boolean AccelStepper::runSpeedToPosition()
 {
     if (_targetPos == _currentPos)
+    {
+        _speed = 0.0;
         return false;
+    }
     if (_targetPos >_currentPos)
         _direction = DIRECTION_CW;
     else
