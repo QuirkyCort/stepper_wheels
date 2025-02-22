@@ -26,120 +26,65 @@ If you read 0x42, you will NOT get the higher or lower byte of 0x41.
 ### Reset (0x01) (UInt8) (Write-Only)
 Reset if a 1 is written.
 
-### Enable (0x02) (UInt8)
+### Enable (0x02) (UInt8) (Write-Only)
 1 to enable (default), 0 to disable.
 If disabled, the steppers will be free to rotate.
 If enabled, the steppers will be held in place.
 
-### Trigger (0x41, 0x42, 0x43, 0x44) (UInt16)
+### Stop (0x20, 0x21, 0x22, 0x23) (UInt8) (Write-Only)
 Each address correspond to one stepper (X, Y, Z, A).
 
-The trigger controls the period between each step (stepper movement).
-When set to 0, the stepper will not step (ie. it'll hold in place).
+Write 1 to stop the stepper immediately.
+Any other values will have no effects.
 
-```
-Period = (Trigger + 1) * 128us
-```
-
-Given the desired speed (...in steps per second), the trigger can be calculated by...
-
-```
-Period(us) = 1000000 / speed(steps per sec)
-Trigger = Period / 128 - 1  # Round to an UInt16 value
-```
-
-### Direction (0x45, 0x46, 0x47, 0x48) (UInt8)
+### Run continuous (0x30, 0x31, 0x32, 0x33) (float) (Write-Only)
 Each address correspond to one stepper (X, Y, Z, A).
 
-Stepper direction.
-0 means forward, 1 means reverse.
+Run the stepper immediately at the specified speed (steps/sec) without acceleration.
+The stepper will continue running until given a different command.
 
-### Mode (0x49, 0x4A, 0x4B, 0x4C) (Uint8)
+### Run to target without ramp (0x40, 0x41, 0x42, 0x43) (float, UInt8, Int32) (Write-Only)
 Each address correspond to one stepper (X, Y, Z, A).
 
-Run mode:
-* 0 : "stop"
-* 1 : "run continuous"
-* 20 : "run till target time"
-* 21 : "run till target time with ramp"
-* 30 : "run till target position"
-* 31 : "run till target position with ramp"
+* float: Speed (steps/sec)
+* UInt8: Target Position Type
+* Int32: Target Position
 
-### Position (0x4D, 0x4E, 0x4F, 0x50) (Int32)
+Run the stepper at the specified speed (without acceleration) to the target position.
+If target position type is set to 1, the target position will be relative to the current position.
+
+### Run to target with ramp (0x50, 0x51, 0x52, 0x53) (float, UInt8, Int32) (Write-Only)
+Each address correspond to one stepper (X, Y, Z, A).
+
+* float: Speed (steps/sec)
+* UInt8: Target Position Type
+* Int32: Target Position
+
+Run the stepper with acceleration to the target position.
+The stepper motor will ramp up the speed at the start, and ramp down at the end.
+If target position type is set to 1, the target position will be relative to the current position.
+
+### Position (0x60, 0x61, 0x62, 0x63) (Int32) (Read/Write)
 Each address correspond to one stepper (X, Y, Z, A).
 
 Position of the stepper in steps.
 This value can be positive or negative (...for movement in the reverse direction).
 Can be written to set the position to zero or any other value.
 
-### Target Position (0x51, 0x52, 0x53, 0x54) Write: (UInt8, Int32), Read: (Int32)
+### Speed (0x70, 0x71, 0x72, 0x73) (float) (Read-Only)
 Each address correspond to one stepper (X, Y, Z, A).
 
-* UInt8: Target Position Type
-* Int32: Target Position
+Current speed of the stepper in steps per second.
+This value can be positive or negative (...for movement in the reverse direction).
 
-If Target Position Type is set to 0 (absolute), the Target Position will set based on the given value.
-If the Target Position Type is set to 1 (relative), the current position will be added to the given value.
-
-When in "run continuous" mode, this value is ignored.
-When in "run till target position" or "run till target position with ramp" mode, the stepper will be automatically stopped, and trigger set to zero when this position is reached.
-
-When reading this address, only the Target Position (Int32) is read and the value is always absolute.
-
-### Target Time (0x55, 0x56, 0x57, 0x58) (UInt16)
+### Acceleration (0x80, 0x81, 0x82, 0x83) (float) (Write-Only)
 Each address correspond to one stepper (X, Y, Z, A).
 
-Target time to run in units of 100ms (ie. if set to 20, the stepper will run for 2000ms).
-Only used in "run till target time" mode.
+Sets the acceleration of the stepper in steps per second squared.
+The polarity of this value doesn't matter (ie. setting to -2 is the same as setting to 2).
 
-When read, it provides the remaining time to run.
-
-### Target Steps with Ramp (0x59, 0x5A, 0x5B, 0x5C) (Int32, UInt16 * 6)
+### Running (0x90, 0x91, 0x92, 0x93) (UInt8) (Read-Only)
 Each address correspond to one stepper (X, Y, Z, A).
 
-The values to write are...
-
-* Int32: Target Steps
-* Int32: Cruise End Steps
-* UInt16: Ramp-up Counter (units of 100ms)
-* UInt16: Ramp-up Delta (amount added to speed at each ramp-up interval)
-* UInt16: Cruise Speed (steps per second)
-* UInt16: Ramp-down Counter (units of 100ms)
-* UInt16: Ramp-down Delta (amount subtracted from speed at each ramp-down interval)
-
-Target Steps and Cruise End Steps are always relative to the current position.
-When the target number of steps is reached, the stepper will stop.
-
-Note that speed is always positive; if moving in reverse, direction must be set separately.
-
-Every 100ms, the stepper will increase its speed by "Ramp-up Delta" and reduce "Ramp-up Counter" by one, until "Ramp-up Counter" reaches zero.
-
-The stepper will then run at "Cruise Speed" for "Cruise Counter" * 100ms.
-
-Finally, the will reduce its speed by "Ramp-down Delta" and reduce "Ramp-down Counter" by one every 100ms, until "Ramp-down Counter" reaches zero.
-Speed will never drop below MIN_SPEED.
-
-This address is write-only, but the target position (...not target steps) may be read using the Target Position address.
-The speed may also be determined at any time by reading Trigger and calculating speed from it.
-
-### Target Time with Ramp (0x5D, 0x5E, 0x5F, 0x60) (UInt16 * 6)
-Each address correspond to one stepper (X, Y, Z, A).
-
-The values to write are...
-
-* UInt16: Ramp-up Counter (units of 100ms)
-* UInt16: Ramp-up Delta (amount added to speed at each ramp-up interval)
-* UInt16: Cruise Counter (units of 100ms)
-* UInt16: Cruise Speed (steps per second)
-* UInt16: Ramp-down Counter (units of 100ms)
-* UInt16: Ramp-down Delta (amount subtracted from speed at each ramp-down interval)
-
-Note that speed is always positive; if moving in reverse, direction must be set separately.
-
-Every 100ms, the stepper will increase its speed by "Ramp-up Delta" and reduce "Ramp-up Counter" by one, until "Ramp-up Counter" reaches zero.
-
-The stepper will then run at "Cruise Speed" for "Cruise Counter" * 100ms.
-
-Finally, the will reduce its speed by "Ramp-down Delta" and reduce "Ramp-down Counter" by one every 100ms, until "Ramp-down Counter" reaches zero, at which time the stepper will stop.
-
-This address is write-only, but the speed may be determined at any time by reading Trigger and calculating speed from it.
+Returns 1 if the stepper is running and 0 if it is not.
+Note: When using Run Continuous, this will return 1 even if the speed is set to zero.
