@@ -15,7 +15,7 @@
 
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 1
-#define PATCH_VERSION 1
+#define PATCH_VERSION 2
 
 #define TARGET_POS_TYPE_SET 0
 #define TARGET_POS_TYPE_ADD 1
