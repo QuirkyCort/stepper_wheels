@@ -15,7 +15,7 @@
 
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 1
-#define PATCH_VERSION 2
+#define PATCH_VERSION 3
 
 #define TARGET_POS_TYPE_SET 0
 #define TARGET_POS_TYPE_ADD 1
@@ -58,6 +58,7 @@ void i2cRxHandler(int numBytes) {
   if (registerPtr == RESET_REGISTER && numBytes == 2) {
     if (Wire.read() == 0x1) {
       resetSteppers();
+      ENABLE_PORT &= ~ENABLE_SET;
     }
 
   // Enable
