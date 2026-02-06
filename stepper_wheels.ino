@@ -42,6 +42,8 @@
 const byte VERSION[] = { MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION };
 
 volatile uint8_t registerPtr = 0;
+volatile uint8_t buffer[10];
+volatile uint8_t bufferLen = 0;
 
 AccelStepper steppers[4] = {
     AccelStepper(AccelStepper::DRIVER, X_STEP, X_DIR),
@@ -52,65 +54,72 @@ AccelStepper steppers[4] = {
 volatile uint8_t mode[4];
 
 void i2cRxHandler(int numBytes) {
-  registerPtr = Wire.read(); // First byte always sets ptr
+  bufferLen = numBytes;
+  for (uint8_t i=0; i<numBytes; i++) {
+    buffer[i] = Wire.read();
+  }
+}
+
+void processRx() {
+  registerPtr = buffer[0]; // First byte always sets ptr
 
   // Reset
-  if (registerPtr == RESET_REGISTER && numBytes == 2) {
-    if (Wire.read() == 0x1) {
+  if (registerPtr == RESET_REGISTER && bufferLen == 2) {
+    if (buffer[1] == 0x1) {
       resetSteppers();
       ENABLE_PORT &= ~ENABLE_SET;
     }
 
   // Enable
-  } else if (registerPtr == ENABLE_REGISTER && numBytes == 2) {
-    if (Wire.read() == 0x1) {
+  } else if (registerPtr == ENABLE_REGISTER && bufferLen == 2) {
+    if (buffer[1] == 0x1) {
       ENABLE_PORT &= ~ENABLE_SET;
     } else {
       ENABLE_PORT |= ENABLE_SET;
     }
 
   // Stop
-  } else if (registerPtr >= STOP_REGISTER && registerPtr < STOP_REGISTER + 4 && numBytes == 2) {
+  } else if (registerPtr >= STOP_REGISTER && registerPtr < STOP_REGISTER + 4 && bufferLen == 2) {
     uint8_t index = registerPtr - STOP_REGISTER;
-    if (Wire.read() == 0x1) {
+    if (buffer[1] == 0x1) {
       mode[index] = MODE_STOP;
       steppers[index].move(0);
       steppers[index].setSpeed(0);
     }
 
   // Run continuous
-  } else if (registerPtr >= RUN_CONTINUOUS_REGISTER && registerPtr < RUN_CONTINUOUS_REGISTER + 4 && numBytes == 5) {
+  } else if (registerPtr >= RUN_CONTINUOUS_REGISTER && registerPtr < RUN_CONTINUOUS_REGISTER + 4 && bufferLen == 5) {
     uint8_t index = registerPtr - RUN_CONTINUOUS_REGISTER;
     float speed;
 
     byte *bytes = (byte*)&speed;
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
+    bytes[0] = buffer[1];
+    bytes[1] = buffer[2];
+    bytes[2] = buffer[3];
+    bytes[3] = buffer[4];
     steppers[index].setSpeed(speed);
     mode[index] = MODE_RUN_CONTINUOUS;
 
   // Run to target position without ramp
-  } else if (registerPtr >= RUN_TO_POS_REGISTER && registerPtr < RUN_TO_POS_REGISTER + 4 && numBytes == 10) {
+  } else if (registerPtr >= RUN_TO_POS_REGISTER && registerPtr < RUN_TO_POS_REGISTER + 4 && bufferLen == 10) {
     uint8_t index = registerPtr - RUN_TO_POS_REGISTER;
     float speed;
     uint8_t rel;
     int32_t position;
 
     byte *bytes = (byte*)&speed;
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
+    bytes[0] = buffer[1];
+    bytes[1] = buffer[2];
+    bytes[2] = buffer[3];
+    bytes[3] = buffer[4];
 
-    rel = Wire.read();
+    rel = buffer[5];
 
     bytes = (byte*)&position;
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
+    bytes[0] = buffer[6];
+    bytes[1] = buffer[7];
+    bytes[2] = buffer[8];
+    bytes[3] = buffer[9];
 
     steppers[index].setMaxSpeed(speed);
     if (rel) {
@@ -122,25 +131,25 @@ void i2cRxHandler(int numBytes) {
     mode[index] = MODE_RUN_TO_POS;
 
   // Run to target position with ramp
-  } else if (registerPtr >= RUN_TO_POS_W_RAMP_REGISTER && registerPtr < RUN_TO_POS_W_RAMP_REGISTER + 4 && numBytes == 10) {
+  } else if (registerPtr >= RUN_TO_POS_W_RAMP_REGISTER && registerPtr < RUN_TO_POS_W_RAMP_REGISTER + 4 && bufferLen == 10) {
     uint8_t index = registerPtr - RUN_TO_POS_W_RAMP_REGISTER;
     float speed;
     uint8_t rel;
     int32_t position;
 
     byte *bytes = (byte*)&speed;
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
+    bytes[0] = buffer[1];
+    bytes[1] = buffer[2];
+    bytes[2] = buffer[3];
+    bytes[3] = buffer[4];
 
-    rel = Wire.read();
+    rel = buffer[5];
 
     bytes = (byte*)&position;
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
+    bytes[0] = buffer[6];
+    bytes[1] = buffer[7];
+    bytes[2] = buffer[8];
+    bytes[3] = buffer[9];
 
     if (rel) {
       steppers[index].move(position);
@@ -151,28 +160,28 @@ void i2cRxHandler(int numBytes) {
     mode[index] = MODE_RUN_TO_POS_W_RAMP;
 
   // Set position
-  } else if (registerPtr >= POSITION_REGISTER && registerPtr < POSITION_REGISTER + 4 && numBytes == 5) {
+  } else if (registerPtr >= POSITION_REGISTER && registerPtr < POSITION_REGISTER + 4 && bufferLen == 5) {
     uint8_t index = registerPtr - POSITION_REGISTER;
     int32_t position;
 
     byte *bytes = (byte*)&position;
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
+    bytes[0] = buffer[1];
+    bytes[1] = buffer[2];
+    bytes[2] = buffer[3];
+    bytes[3] = buffer[4];
 
     steppers[index].setCurrentPosition(position);
 
   // Set acceleration
-  } else if (registerPtr >= ACCELERATION_REGISTER && registerPtr < ACCELERATION_REGISTER + 4 && numBytes == 5) {
+  } else if (registerPtr >= ACCELERATION_REGISTER && registerPtr < ACCELERATION_REGISTER + 4 && bufferLen == 5) {
     uint8_t index = registerPtr - ACCELERATION_REGISTER;
     float acceleration;
 
     byte *bytes = (byte*)&acceleration;
-    bytes[0] = Wire.read();
-    bytes[1] = Wire.read();
-    bytes[2] = Wire.read();
-    bytes[3] = Wire.read();
+    bytes[0] = buffer[1];
+    bytes[1] = buffer[2];
+    bytes[2] = buffer[3];
+    bytes[3] = buffer[4];
 
     steppers[index].setAcceleration(acceleration);
   }
@@ -217,7 +226,7 @@ void resetSteppers() {
     steppers[i].setCurrentPosition(0);
     steppers[i].moveTo(0);
     steppers[i].setSpeed(0);
-    steppers[i].setAcceleration(1);
+    steppers[i].setAcceleration(500);
     steppers[i].setMaxSpeed(1);
     mode[i] = MODE_STOP;
   }
@@ -237,6 +246,7 @@ void setup() {
 }
 
 void loop() {
+  processRx();
   for (int i=0; i<4; i++) {
     if (mode[i] == MODE_RUN_CONTINUOUS) {
       steppers[i].runSpeed();

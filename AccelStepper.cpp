@@ -647,6 +647,7 @@ boolean AccelStepper::runSpeedToPosition()
     if (_targetPos == _currentPos)
     {
         _speed = 0.0;
+        _stepInterval = 0;
         return false;
     }
     if (_targetPos >_currentPos)
