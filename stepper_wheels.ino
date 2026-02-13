@@ -15,7 +15,7 @@
 
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 1
-#define PATCH_VERSION 3
+#define PATCH_VERSION 4
 
 #define TARGET_POS_TYPE_SET 0
 #define TARGET_POS_TYPE_ADD 1
@@ -44,6 +44,7 @@ const byte VERSION[] = { MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION };
 volatile uint8_t registerPtr = 0;
 volatile uint8_t buffer[10];
 volatile uint8_t bufferLen = 0;
+volatile bool preIsRunning[4] = {false, false, false, false};
 
 AccelStepper steppers[4] = {
     AccelStepper(AccelStepper::DRIVER, X_STEP, X_DIR),
@@ -57,6 +58,26 @@ void i2cRxHandler(int numBytes) {
   bufferLen = numBytes;
   for (uint8_t i=0; i<numBytes; i++) {
     buffer[i] = Wire.read();
+  }
+
+  // Set preIsRunning to avoid race when a IsRunning request is received before the Rx is processed.
+
+  // Run continuous
+  if (registerPtr >= RUN_CONTINUOUS_REGISTER && registerPtr < RUN_CONTINUOUS_REGISTER + 4 && bufferLen == 5) {
+    uint8_t index = registerPtr - RUN_CONTINUOUS_REGISTER;
+    preIsRunning[index] = true;
+
+
+  // Run to target position without ramp
+  } else if (registerPtr >= RUN_TO_POS_REGISTER && registerPtr < RUN_TO_POS_REGISTER + 4 && bufferLen == 10) {
+    uint8_t index = registerPtr - RUN_TO_POS_REGISTER;
+    preIsRunning[index] = true;
+
+
+  // Run to target position with ramp
+  } else if (registerPtr >= RUN_TO_POS_W_RAMP_REGISTER && registerPtr < RUN_TO_POS_W_RAMP_REGISTER + 4 && bufferLen == 10) {
+    uint8_t index = registerPtr - RUN_TO_POS_W_RAMP_REGISTER;
+    preIsRunning[index] = true;
   }
 }
 
@@ -99,6 +120,7 @@ void processRx() {
     bytes[3] = buffer[4];
     steppers[index].setSpeed(speed);
     mode[index] = MODE_RUN_CONTINUOUS;
+    preIsRunning[index] = false;
 
   // Run to target position without ramp
   } else if (registerPtr >= RUN_TO_POS_REGISTER && registerPtr < RUN_TO_POS_REGISTER + 4 && bufferLen == 10) {
@@ -129,6 +151,7 @@ void processRx() {
     }
     steppers[index].setSpeed(speed);
     mode[index] = MODE_RUN_TO_POS;
+    preIsRunning[index] = false;
 
   // Run to target position with ramp
   } else if (registerPtr >= RUN_TO_POS_W_RAMP_REGISTER && registerPtr < RUN_TO_POS_W_RAMP_REGISTER + 4 && bufferLen == 10) {
@@ -158,6 +181,7 @@ void processRx() {
     }
     steppers[index].setMaxSpeed(speed);
     mode[index] = MODE_RUN_TO_POS_W_RAMP;
+    preIsRunning[index] = false;
 
   // Set position
   } else if (registerPtr >= POSITION_REGISTER && registerPtr < POSITION_REGISTER + 4 && bufferLen == 5) {
@@ -208,9 +232,12 @@ void i2cReqHandler(void) {
   // Running
   } else if (registerPtr >= RUNNING_REGISTER && registerPtr < RUNNING_REGISTER + 4) {
     uint8_t index = registerPtr - RUNNING_REGISTER;
-    char running = steppers[index].isRunning();
-
-    Wire.write(running);
+    if (preIsRunning[index]) {
+      Wire.write(1);
+    } else {
+      char running = steppers[index].isRunning();
+      Wire.write(running);
+    }
 
   }
 }
