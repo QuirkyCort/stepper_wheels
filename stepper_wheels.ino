@@ -61,6 +61,7 @@ void i2cRxHandler(int numBytes) {
   }
 
   // Set preIsRunning to avoid race when a IsRunning request is received before the Rx is processed.
+  registerPtr = buffer[0]; // First byte always sets ptr
 
   // Run continuous
   if (registerPtr >= RUN_CONTINUOUS_REGISTER && registerPtr < RUN_CONTINUOUS_REGISTER + 4 && bufferLen == 5) {
@@ -83,6 +84,10 @@ void i2cRxHandler(int numBytes) {
 
 void processRx() {
   registerPtr = buffer[0]; // First byte always sets ptr
+
+  if (bufferLen == 0) {
+    return;
+  }
 
   // Reset
   if (registerPtr == RESET_REGISTER && bufferLen == 2) {
@@ -210,6 +215,7 @@ void processRx() {
     steppers[index].setAcceleration(acceleration);
   }
 
+  bufferLen = 0;
 }
 
 void i2cReqHandler(void) {
@@ -240,6 +246,8 @@ void i2cReqHandler(void) {
     }
 
   }
+  
+  bufferLen = 0;
 }
 
 void initPins() {
