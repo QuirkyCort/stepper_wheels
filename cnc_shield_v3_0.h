@@ -1,5 +1,4 @@
-#define ENABLE_PORT PORTB
-#define ENABLE_SET B00000001
+#define ENABLE_PIN 8
 
 #define X_DIR 5
 #define Y_DIR 6

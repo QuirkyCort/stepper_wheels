@@ -93,15 +93,15 @@ void processRx() {
   if (registerPtr == RESET_REGISTER && bufferLen == 2) {
     if (buffer[1] == 0x1) {
       resetSteppers();
-      ENABLE_PORT &= ~ENABLE_SET;
+      digitalWrite(ENABLE_PIN, 0);
     }
 
   // Enable
   } else if (registerPtr == ENABLE_REGISTER && bufferLen == 2) {
     if (buffer[1] == 0x1) {
-      ENABLE_PORT &= ~ENABLE_SET;
+      digitalWrite(ENABLE_PIN, 0);
     } else {
-      ENABLE_PORT |= ENABLE_SET;
+      digitalWrite(ENABLE_PIN, 1);
     }
 
   // Stop
@@ -251,8 +251,8 @@ void i2cReqHandler(void) {
 }
 
 void initPins() {
-  pinMode(8, OUTPUT); // Enable
-  digitalWrite(9, 0); // LOW to enable
+  pinMode(ENABLE_PIN, OUTPUT); // Enable
+  digitalWrite(ENABLE_PIN, 0); // LOW to enable
 }
 
 void resetSteppers() {
