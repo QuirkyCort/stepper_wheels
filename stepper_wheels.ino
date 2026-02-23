@@ -15,7 +15,7 @@
 
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 1
-#define PATCH_VERSION 4
+#define PATCH_VERSION 5
 
 #define TARGET_POS_TYPE_SET 0
 #define TARGET_POS_TYPE_ADD 1
@@ -83,11 +83,11 @@ void i2cRxHandler(int numBytes) {
 }
 
 void processRx() {
-  registerPtr = buffer[0]; // First byte always sets ptr
-
   if (bufferLen == 0) {
     return;
   }
+
+  noInterrupts();
 
   // Reset
   if (registerPtr == RESET_REGISTER && bufferLen == 2) {
@@ -216,6 +216,8 @@ void processRx() {
   }
 
   bufferLen = 0;
+
+  interrupts();
 }
 
 void i2cReqHandler(void) {
@@ -246,7 +248,7 @@ void i2cReqHandler(void) {
     }
 
   }
-  
+
   bufferLen = 0;
 }
 
